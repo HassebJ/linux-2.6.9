@@ -92,6 +92,21 @@ void free_uid(struct user_struct *up)
 	}
 }
 
+int count_users(uid_t uid)
+{
+	struct list_head *up;
+	spin_lock(&uidhash_lock);
+	struct list_head *hashent = uidhash_table;
+	int count = 0;
+	list_for_each(up, hashent) {
+		struct user_struct *user;
+		user = list_entry(up, struct user_struct, uidhash_list);
+		count++;
+	}
+	spin_unlock(&uidhash_lock);
+	return count;
+}
+
 struct user_struct * alloc_uid(uid_t uid)
 {
 	struct list_head *hashent = uidhashentry(uid);

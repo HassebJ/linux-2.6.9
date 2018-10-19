@@ -1,0 +1,149 @@
+diff --git a/arch/i386/kernel/entry.S b/arch/i386/kernel/entry.S
+index 3a8c31e..885bffe 100644
+--- a/arch/i386/kernel/entry.S
++++ b/arch/i386/kernel/entry.S
+@@ -901,5 +901,7 @@ ENTRY(sys_call_table)
+ 	.long sys_mq_getsetattr
+ 	.long sys_ni_syscall		/* reserved for kexec */
+ 	.long sys_waitid
++	.long sys_toggle_fss
++	.long sys_toggle_fss_profiling
+ 
+ syscall_table_size=(.-sys_call_table)
+diff --git a/include/asm-i386/unistd.h b/include/asm-i386/unistd.h
+index be8c6ac..a9a7755 100644
+--- a/include/asm-i386/unistd.h
++++ b/include/asm-i386/unistd.h
+@@ -290,8 +290,10 @@
+ #define __NR_mq_getsetattr	(__NR_mq_open+5)
+ #define __NR_sys_kexec_load	283
+ #define __NR_waitid		284
++#define __NR_toggle_fss		285
++#define __NR_toggle_fss_profiling	286
+ 
+-#define NR_syscalls 285
++#define NR_syscalls 287
+ 
+ /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */
+ 
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 8810b55..f62efb0 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -126,6 +126,7 @@ extern unsigned long nr_iowait(void);
+ #define SCHED_NORMAL		0
+ #define SCHED_FIFO		1
+ #define SCHED_RR		2
++#define SCHED_FSS		3
+ 
+ struct sched_param {
+ 	int sched_priority;
+@@ -352,6 +353,8 @@ struct user_struct {
+ };
+ 
+ extern struct user_struct *find_user(uid_t);
++extern int count_users(uid_t);
++
+ 
+ extern struct user_struct root_user;
+ #define INIT_USER (&root_user)
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 01e2322..38a8493 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -47,6 +47,9 @@
+ 
+ #include <asm/unistd.h>
+ 
++atomic_t is_fss_enabled;
++atomic_t is_fss_profiling_enabled;
++
+ #ifdef CONFIG_NUMA
+ #define cpu_to_node_mask(cpu) node_to_cpumask(cpu_to_node(cpu))
+ #else
+@@ -175,6 +178,22 @@
+ 
+ static unsigned int task_timeslice(task_t *p)
+ {
++	 if(atomic_read(&is_fss_enabled) && p->uid != root_user.uid){
++		struct user_struct *p_user = find_user(p->uid);
++		unsigned long long now;
++		now = sched_clock();
++		int total_users = count_users(p->uid);
++		int time_for_this_user = DEF_TIMESLICE; // / total_users;
++		unsigned int ts = time_for_this_user / atomic_read(&p_user->processes);
++		if(ts < MIN_TIMESLICE){
++			ts = MIN_TIMESLICE;
++		}
++		if(atomic_read(&is_fss_profiling_enabled)){
++			printk(KERN_INFO "Lab 3 => Scheduled Process, UID:%u, PID:%d, TS:%u, current_time: %llu, count:%d\n", p->user->uid, p->pid, ts, now, total_users);
++		}
++		return ts;
++	 }
++
+ 	if (p->static_prio < NICE_TO_PRIO(0))
+ 		return SCALE_PRIO(DEF_TIMESLICE*4, p->static_prio);
+ 	else
+@@ -1501,6 +1520,18 @@ asmlinkage void schedule_tail(task_t *prev)
+ 		put_user(current->pid, current->set_child_tid);
+ }
+ 
++asmlinkage long sys_toggle_fss(int is_enabled)
++{
++	atomic_set(&is_fss_enabled, is_enabled);
++	return is_enabled;
++}
++
++asmlinkage long sys_toggle_fss_profiling(int is_enabled)
++{
++	atomic_set(&is_fss_profiling_enabled, is_enabled);
++	return is_enabled;
++}
++
+ /*
+  * context_switch - switch to the new MM and the new
+  * thread's register state.
+@@ -2436,7 +2467,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
+ 		 * RR tasks need a special form of timeslice management.
+ 		 * FIFO tasks have no timeslices.
+ 		 */
+-		if ((p->policy == SCHED_RR) && !--p->time_slice) {
++		if ((atomic_read(&is_fss_enabled) || p->policy == SCHED_RR) && !--p->time_slice) {
+ 			p->time_slice = task_timeslice(p);
+ 			p->first_time_slice = 0;
+ 			set_tsk_need_resched(p);
+@@ -4744,6 +4775,8 @@ void __init sched_init(void)
+ 	 * when this runqueue becomes "idle".
+ 	 */
+ 	init_idle(current, smp_processor_id());
++	atomic_set(&is_fss_enabled, 1);
++	atomic_set(&is_fss_profiling_enabled, 0);
+ }
+ 
+ #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
+diff --git a/kernel/user.c b/kernel/user.c
+index 523175a..d37b8bc 100644
+--- a/kernel/user.c
++++ b/kernel/user.c
+@@ -92,6 +92,21 @@ void free_uid(struct user_struct *up)
+ 	}
+ }
+ 
++int count_users(uid_t uid)
++{
++	struct list_head *up;
++	spin_lock(&uidhash_lock);
++	struct list_head *hashent = uidhash_table;
++	int count = 0;
++	list_for_each(up, hashent) {
++		struct user_struct *user;
++		user = list_entry(up, struct user_struct, uidhash_list);
++		count++;
++	}
++	spin_unlock(&uidhash_lock);
++	return count;
++}
++
+ struct user_struct * alloc_uid(uid_t uid)
+ {
+ 	struct list_head *hashent = uidhashentry(uid);

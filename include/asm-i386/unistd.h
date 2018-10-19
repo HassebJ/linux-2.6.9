@@ -290,8 +290,10 @@
 #define __NR_mq_getsetattr	(__NR_mq_open+5)
 #define __NR_sys_kexec_load	283
 #define __NR_waitid		284
+#define __NR_toggle_fss		285
+#define __NR_toggle_fss_profiling	286
 
-#define NR_syscalls 285
+#define NR_syscalls 287
 
 /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */
 

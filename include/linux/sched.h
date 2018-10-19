@@ -126,6 +126,7 @@ extern unsigned long nr_iowait(void);
 #define SCHED_NORMAL		0
 #define SCHED_FIFO		1
 #define SCHED_RR		2
+#define SCHED_FSS		3
 
 struct sched_param {
 	int sched_priority;
@@ -352,6 +353,8 @@ struct user_struct {
 };
 
 extern struct user_struct *find_user(uid_t);
+extern int count_users(uid_t);
+
 
 extern struct user_struct root_user;
 #define INIT_USER (&root_user)

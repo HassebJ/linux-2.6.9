@@ -47,6 +47,9 @@
 
 #include <asm/unistd.h>
 
+atomic_t is_fss_enabled;
+atomic_t is_fss_profiling_enabled;
+
 #ifdef CONFIG_NUMA
 #define cpu_to_node_mask(cpu) node_to_cpumask(cpu_to_node(cpu))
 #else
@@ -175,6 +178,22 @@
 
 static unsigned int task_timeslice(task_t *p)
 {
+	 if(atomic_read(&is_fss_enabled) && p->uid != root_user.uid){
+		struct user_struct *p_user = find_user(p->uid);
+		unsigned long long now;
+		now = sched_clock();
+		int total_users = count_users(p->uid);
+		int time_for_this_user = DEF_TIMESLICE; // / total_users;
+		unsigned int ts = time_for_this_user / atomic_read(&p_user->processes);
+		if(ts < MIN_TIMESLICE){
+			ts = MIN_TIMESLICE;
+		}
+		if(atomic_read(&is_fss_profiling_enabled)){
+			printk(KERN_INFO "Lab 3 => Scheduled Process, UID:%u, PID:%d, TS:%u, current_time: %llu, count:%d\n", p->user->uid, p->pid, ts, now, total_users);
+		}
+		return ts;
+	 }
+
 	if (p->static_prio < NICE_TO_PRIO(0))
 		return SCALE_PRIO(DEF_TIMESLICE*4, p->static_prio);
 	else
@@ -1501,6 +1520,18 @@ asmlinkage void schedule_tail(task_t *prev)
 		put_user(current->pid, current->set_child_tid);
 }
 
+asmlinkage long sys_toggle_fss(int is_enabled)
+{
+	atomic_set(&is_fss_enabled, is_enabled);
+	return is_enabled;
+}
+
+asmlinkage long sys_toggle_fss_profiling(int is_enabled)
+{
+	atomic_set(&is_fss_profiling_enabled, is_enabled);
+	return is_enabled;
+}
+
 /*
  * context_switch - switch to the new MM and the new
  * thread's register state.
@@ -2436,7 +2467,7 @@ void scheduler_tick(int user_ticks, int sys_ticks)
 		 * RR tasks need a special form of timeslice management.
 		 * FIFO tasks have no timeslices.
 		 */
-		if ((p->policy == SCHED_RR) && !--p->time_slice) {
+		if ((atomic_read(&is_fss_enabled) || p->policy == SCHED_RR) && !--p->time_slice) {
 			p->time_slice = task_timeslice(p);
 			p->first_time_slice = 0;
 			set_tsk_need_resched(p);
@@ -4744,6 +4775,8 @@ void __init sched_init(void)
 	 * when this runqueue becomes "idle".
 	 */
 	init_idle(current, smp_processor_id());
+	atomic_set(&is_fss_enabled, 1);
+	atomic_set(&is_fss_profiling_enabled, 0);
 }
 
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP

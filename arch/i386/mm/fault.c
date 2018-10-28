@@ -291,11 +291,15 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		down_read(&mm->mmap_sem);
 	}
 
+	// #########Need to get the VMA
 	vma = find_vma(mm, address);
+	// #########Accessed area that is illegal
 	if (!vma)
 		goto bad_area;
+	// ######### Whether the address looking for is within the vma area
 	if (vma->vm_start <= address)
 		goto good_area;
+	// #########
 	if (!(vma->vm_flags & VM_GROWSDOWN))
 		goto bad_area;
 	if (error_code & 4) {

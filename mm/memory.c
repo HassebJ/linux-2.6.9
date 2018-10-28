@@ -1038,6 +1038,8 @@ static inline void break_cow(struct vm_area_struct * vma, struct page * new_page
  * We hold the mm semaphore and the page_table_lock on entry and exit
  * with the page_table_lock released.
  */
+
+// ######### lab4 needs to be implemented here
 static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	unsigned long address, pte_t *page_table, pmd_t *pmd, pte_t pte)
 {
@@ -1757,6 +1759,58 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	if (ret < 0)
 		return ret;
 	return ret == len ? 0 : -1;
+}
+
+asmlinkage long sys_cp_range(void *start_addr, void *end_addr, int flag)
+{
+	if(flag == 0){
+
+		printk(KERN_INFO "some non-implemented scheme");
+	}else{
+		// get_user_pages implementation
+
+		struct page **pages;
+		struct vm_area_struct **vmas;
+		int ret, len, write, page_array_size, vma_array_size;
+		struct vm_area_struct * vma;
+
+		unsigned long addr = *((unsigned long*)start_addr);
+		unsigned long end = *((unsigned long*)end_addr);
+		vma = find_vma(current->mm, addr);
+		if (!vma)
+			return -1;
+		write = 0;
+		if (addr >= end)
+			BUG();
+		if (end > vma->vm_end)
+			BUG();
+		len = (end+PAGE_SIZE-1)/PAGE_SIZE-addr/PAGE_SIZE;
+
+
+		int size = len + PAGE_SIZE;
+
+		int nr_pages = size >> PAGE_SHIFT;
+
+		printk(KERN_INFO "len: %d, nr_pages: %d\n", len, nr_pages);
+
+		page_array_size = (len * sizeof(struct page *));
+		*pages = kmalloc(page_array_size, GFP_KERNEL);
+
+		vma_array_size = (len * sizeof(struct vm_area_struct *));
+		*pages = kmalloc(vma_array_size, GFP_KERNEL);
+
+		ret = get_user_pages(current, current->mm, addr,
+				len, write, 0, pages, vmas);
+		if (ret < 0)
+			return ret;
+
+		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
+
+
+
+
+	}
+	return 0;
 }
 
 /* 

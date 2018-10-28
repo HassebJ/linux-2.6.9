@@ -625,7 +625,7 @@ extern void remove_shrinker(struct shrinker *shrinker);
 
 /*
  * On a two-level page table, this ends up being trivial. Thus the
- * inlining and the symmetry break with pte_alloc_map() that does all
+ * ≠≠inlining and the symmetry break with pte_alloc_map() that does all
  * of this out-of-line.
  */
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)

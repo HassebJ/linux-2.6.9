@@ -82,6 +82,8 @@ EXPORT_SYMBOL(highmem_start_page);
 EXPORT_SYMBOL(high_memory);
 EXPORT_SYMBOL(vmalloc_earlyreserve);
 
+static int cp_count = 0;
+
 /*
  * We special-case the C-O-W ZERO_PAGE, because it's such
  * a common occurrence (no need to read the page to know
@@ -1761,8 +1763,10 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	return ret == len ? 0 : -1;
 }
 
-asmlinkage long sys_cp_range(void *start_addr, void *end_addr, int flag)
+asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, int flag)
 {
+//	flag = 1;
+	printk(KERN_INFO "Inside cp_range\n");
 	if(flag == 0){
 
 		printk(KERN_INFO "some non-implemented scheme");
@@ -1773,9 +1777,17 @@ asmlinkage long sys_cp_range(void *start_addr, void *end_addr, int flag)
 		struct vm_area_struct **vmas;
 		int ret, len, write, page_array_size, vma_array_size;
 		struct vm_area_struct * vma;
+		struct file *file;
+		mm_segment_t old_fs;
+		int vma_index;
+		loff_t pos = 0;
 
-		unsigned long addr = *((unsigned long*)start_addr);
-		unsigned long end = *((unsigned long*)end_addr);
+		unsigned long addr = start_addr;
+		unsigned long end = end_addr;
+		char *file_name = kmalloc(32, GFP_KERNEL);
+		sprintf(file_name, "/var/log/%d-%d", current->pid, cp_count);
+
+		printk(KERN_INFO "long: %lu, end: %lu\n", addr, end);
 		vma = find_vma(current->mm, addr);
 		if (!vma)
 			return -1;
@@ -1794,20 +1806,51 @@ asmlinkage long sys_cp_range(void *start_addr, void *end_addr, int flag)
 		printk(KERN_INFO "len: %d, nr_pages: %d\n", len, nr_pages);
 
 		page_array_size = (len * sizeof(struct page *));
-		*pages = kmalloc(page_array_size, GFP_KERNEL);
+		pages = kmalloc(page_array_size, GFP_KERNEL);
 
 		vma_array_size = (len * sizeof(struct vm_area_struct *));
-		*pages = kmalloc(vma_array_size, GFP_KERNEL);
+		vmas = kmalloc(vma_array_size, GFP_KERNEL);
 
 		ret = get_user_pages(current, current->mm, addr,
 				len, write, 0, pages, vmas);
+	
+
 		if (ret < 0)
 			return ret;
 
 		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
 
+		old_fs = get_fs();  //Save the current FS segment
+		set_fs(get_ds());
+
+		file = filp_open(file_name, O_WRONLY|O_CREAT, 0644);
 
 
+		for(vma_index = 0; vma_index < vma_array_size; vma_index++){
+			int current_start;
+			struct vm_area_struct *current_vma = vmas[vma_index];
+
+			int vma_size = current_vma->vm_end - current_vma->vm_start;
+			char *data = kmalloc(vma_size, GFP_KERNEL);
+			sprintf(data, "%lu ", current_vma->vm_start);
+
+			vfs_write(file, data, vma_size, &pos);
+			pos = pos+vma_size;
+
+			kfree(data);
+//			for (current_start = current_vma->vm_start; current_start < current_vma->vm_end; current_start += PAGE_SIZE) {
+//
+//			}
+		}
+
+
+
+
+
+		// free memory
+		set_fs(old_fs); //Reset to save FS
+		filp_close(file,NULL);
+		kfree(file_name);
 
 	}
 	return 0;

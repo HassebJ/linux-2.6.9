@@ -1742,6 +1742,94 @@ out:
 	return pmd_offset(pgd, address);
 }
 
+
+int
+valid_page(struct page *pg, unsigned long pgstart) {
+ if(!pg) {
+     printk(KERN_INFO "Page does not exist..\n");
+     return 0;
+ }
+
+ if (PageLocked(pg)) {
+     printk(KERN_INFO "Page locked: %lu\n", pgstart);
+     return 0;
+ }
+
+ if (PageError(pg)) {
+     printk(KERN_INFO "Page error: %lu\n", pgstart);
+     return 0;
+ }
+
+ if (PageReclaim(pg))
+     printk(KERN_INFO "Page is reclaim: %lu\n", pgstart);
+ if (PageMappedToDisk(pg))
+     printk(KERN_INFO "Page is mappedtodisk: %lu\n", pgstart);
+ if (PageSwapCache(pg))
+     printk(KERN_INFO "Page is swapcache: %lu\n", pgstart);
+ if (PageCompound(pg))
+     printk(KERN_INFO "Page is compound: %lu\n", pgstart);
+ if (PageNosave(pg))
+     printk(KERN_INFO "Page is nosave: %lu\n", pgstart);
+ if (PageWriteback(pg))
+     printk(KERN_INFO "Page is writeback: %lu\n", pgstart);
+ if (PagePrivate(pg))
+     printk(KERN_INFO "Page is private: %lu\n", pgstart);
+ if (PageChecked(pg))
+     printk(KERN_INFO "Page is checked: %lu\n", pgstart);
+ if (PageSlab(pg))
+     printk(KERN_INFO "Page is slab: %lu\n", pgstart);
+ if (PageActive(pg))
+     printk(KERN_INFO "Page is active: %lu\n", pgstart);
+ if (PageLRU(pg))
+     printk(KERN_INFO "Page is lru: %lu\n", pgstart);
+ if (PageUptodate(pg))
+     printk(KERN_INFO "Page is uptodate: %lu\n", pgstart);
+ if (PageReferenced(pg))
+     printk(KERN_INFO "Page is referenced: %lu\n", pgstart);
+ if (PageHighMem(pg))
+     printk(KERN_INFO "Page is highmem: %lu\n", pgstart);
+
+ if (PageReserved(pg)) {
+     printk(KERN_INFO "Page reserved: %lu\n", pgstart);
+     return 0;
+ }
+
+ if (pg == ZERO_PAGE(pgstart)) {
+     printk(KERN_INFO "Incremental: ZERO page: %lu\n", pgstart);
+     return 0;
+ }
+
+ return 1;
+}
+
+
+void write_addr_to_file(unsigned long address) {
+	unsigned long start_address;
+	mm_segment_t old_fs;
+	struct file *file;
+	loff_t pos = 0;
+
+	char *filename = kmalloc(32, GFP_KERNEL);
+	sprintf(filename, "/var/log/%d-%d", current->pid, cp_count);
+	old_fs = get_fs();
+	set_fs(get_ds());
+
+	file = filp_open(filename, O_WRONLY|O_CREAT, 0644);
+
+	printk(KERN_INFO "Writing new cp_file: %s\n", filename);
+	for (start_address = address; start_address < address + PAGE_SIZE; start_address++) {
+		long int *value = (unsigned long *) start_address;
+		char *data = kmalloc(32, GFP_KERNEL);
+		sprintf(data, "%lu ", *value);
+		vfs_write(file, data, strlen(data), &pos);
+		pos = pos+strlen(data);
+		kfree(data);
+	}
+	set_fs(old_fs);
+	filp_close(file,NULL);
+	kfree(filename);
+}
+
 int make_pages_present(unsigned long addr, unsigned long end)
 {
 	int ret, len, write;
@@ -1784,8 +1872,6 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 
 		unsigned long addr = start_addr;
 		unsigned long end = end_addr;
-		char *file_name = kmalloc(32, GFP_KERNEL);
-		sprintf(file_name, "/var/log/%d-%d", current->pid, cp_count);
 
 		printk(KERN_INFO "long: %lu, end: %lu\n", addr, end);
 		vma = find_vma(current->mm, addr);
@@ -1796,14 +1882,7 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 			BUG();
 		if (end > vma->vm_end)
 			BUG();
-		len = (end+PAGE_SIZE-1)/PAGE_SIZE-addr/PAGE_SIZE;
-
-
-		int size = len + PAGE_SIZE;
-
-		int nr_pages = size >> PAGE_SHIFT;
-
-		printk(KERN_INFO "len: %d, nr_pages: %d\n", len, nr_pages);
+		len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
 
 		page_array_size = (len * sizeof(struct page *));
 		pages = kmalloc(page_array_size, GFP_KERNEL);
@@ -1814,43 +1893,38 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 		ret = get_user_pages(current, current->mm, addr,
 				len, write, 0, pages, vmas);
 	
-
 		if (ret < 0)
 			return ret;
 
 		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
 
-		old_fs = get_fs();  //Save the current FS segment
-		set_fs(get_ds());
-
-		file = filp_open(file_name, O_WRONLY|O_CREAT, 0644);
-
-
-		for(vma_index = 0; vma_index < vma_array_size; vma_index++){
+		for(vma_index = 0; vma_index < len; vma_index++){
 			int current_start;
 			struct vm_area_struct *current_vma = vmas[vma_index];
+			struct page *current_page = pages[vma_index];
 
-			int vma_size = current_vma->vm_end - current_vma->vm_start;
-			char *data = kmalloc(vma_size, GFP_KERNEL);
-			sprintf(data, "%lu ", current_vma->vm_start);
+			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page->virtual: %lu\n",
+					current_page->index, current_page->_count, *current_page);
 
-			vfs_write(file, data, vma_size, &pos);
-			pos = pos+vma_size;
+			printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
 
-			kfree(data);
-//			for (current_start = current_vma->vm_start; current_start < current_vma->vm_end; current_start += PAGE_SIZE) {
-//
-//			}
+			unsigned long current_start_addr;
+		    for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
+
+				if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
+					|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
+					|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
+
+					write_addr_to_file(current_start_addr);
+				} else {
+					printk(KERN_INFO "Address out of range \n");
+				}
+		    }
+		    printk(KERN_INFO "finished vma_index: %d\n", vma_index);
 		}
+		cp_count++;
 
-
-
-
-
-		// free memory
-		set_fs(old_fs); //Reset to save FS
-		filp_close(file,NULL);
-		kfree(file_name);
+		printk(KERN_INFO "cp_range finished\n");
 
 	}
 	return 0;

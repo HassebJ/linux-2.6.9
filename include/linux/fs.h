@@ -417,11 +417,15 @@ static inline int mapping_writably_mapped(struct address_space *mapping)
 #define i_size_ordered_init(inode) do { } while (0)
 #endif
 
+/* todo important
+ * Diff btw symlink and hardlink
+ * deep copy shallow copy
+ */
 struct inode {
-	struct hlist_node	i_hash;
+	struct hlist_node	i_hash;			// given i_no and superblock info, can fetch the inode
 	struct list_head	i_list;
-	struct list_head	i_dentry;
-	unsigned long		i_ino;
+	struct list_head	i_dentry;		// one file may have multipe dentries,
+	unsigned long		i_ino;    		//unide id for every inode
 	atomic_t		i_count;
 	umode_t			i_mode;
 	unsigned int		i_nlink;
@@ -446,7 +450,7 @@ struct inode {
 	struct super_block	*i_sb;
 	struct file_lock	*i_flock;
 	struct address_space	*i_mapping;
-	struct address_space	i_data;
+	struct address_space	i_data;		//different from vma, represents page cache ^ points to the same
 #ifdef CONFIG_QUOTA
 	struct dquot		*i_dquot[MAXQUOTAS];
 #endif
@@ -562,7 +566,7 @@ struct file_ra_state {
 	unsigned long mmap_hit;		/* Cache hit stat for mmap accesses */
 	unsigned long mmap_miss;	/* Cache miss stat for mmap accesses */
 };
-
+// todo used to keep track of files that are open
 struct file {
 	struct list_head	f_list;
 	struct dentry		*f_dentry;
@@ -741,7 +745,7 @@ struct super_block {
 	unsigned long		s_blocksize;
 	unsigned long		s_old_blocksize;
 	unsigned char		s_blocksize_bits;
-	unsigned char		s_dirt;
+	unsigned char		s_dirt;  // todo superblock modified or not
 	unsigned long long	s_maxbytes;	/* Max file size */
 	struct file_system_type	*s_type;
 	struct super_operations	*s_op;
@@ -765,7 +769,7 @@ struct super_block {
 	struct list_head	s_files;
 
 	struct block_device	*s_bdev;
-	struct list_head	s_instances;
+	struct list_head	s_instances;  // todo same file system mounted multiple time, chained with this data structure
 	struct quota_info	s_dquot;	/* Diskquota specific options */
 
 	int			s_frozen;
@@ -916,6 +920,7 @@ struct file_operations {
 	int (*flock) (struct file *, int, struct file_lock *);
 };
 
+//todo operations defined on inode
 struct inode_operations {
 	int (*create) (struct inode *,struct dentry *,int, struct nameidata *);
 	struct dentry * (*lookup) (struct inode *,struct dentry *, struct nameidata *);
@@ -953,14 +958,18 @@ extern ssize_t vfs_writev(struct file *, const struct iovec __user *,
  * NOTE: write_inode, delete_inode, clear_inode, put_inode can be called
  * without the big kernel lock held in all filesystems.
  */
+
+// todo functions for superblock
+// bfs is the simplest fs
 struct super_operations {
-   	struct inode *(*alloc_inode)(struct super_block *sb);
+   	struct inode *(*alloc_inode)(struct super_block *sb);   //if you dont implement by uorself then the default one would be called
+   															// default implemented at incode.c:102
 	void (*destroy_inode)(struct inode *);
 
-	void (*read_inode) (struct inode *);
+	void (*read_inode) (struct inode *);					// todo need to implement this => may look at how it is implemented in ext2.
   
    	void (*dirty_inode) (struct inode *);
-	int (*write_inode) (struct inode *, int);
+	int (*write_inode) (struct inode *, int);				// need to implement
 	void (*put_inode) (struct inode *);
 	void (*drop_inode) (struct inode *);
 	void (*delete_inode) (struct inode *);
@@ -1115,7 +1124,7 @@ struct export_operations {
 
 };
 
-
+// todo important data structure
 struct file_system_type {
 	const char *name;
 	int fs_flags;

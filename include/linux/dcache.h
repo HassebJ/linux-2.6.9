@@ -22,6 +22,8 @@ struct vfsmount;
  * with heavy changes by Linus Torvalds
  */
 
+
+// stores the cache representative of inode and superblock information in the disk
 #define IS_ROOT(x) ((x) == (x)->d_parent)
 
 /*
@@ -84,13 +86,13 @@ struct dentry {
 	atomic_t d_count;
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
-	struct inode *d_inode;		/* Where the name belongs to - NULL is
+	struct inode *d_inode;		/* Where the name belongs to - NULL is  => the indode this dentry points to
 					 * negative */
 	/*
 	 * The next three fields are touched by __d_lookup.  Place them here
 	 * so they all fit in a 16-byte range, with 16-byte alignment.
 	 */
-	struct dentry *d_parent;	/* parent directory */
+	struct dentry *d_parent;	/* parent directory */         // => access using ../
 	struct hlist_head *d_bucket;	/* lookup hash bucket */
 	struct qstr d_name;
 

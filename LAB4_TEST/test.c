@@ -21,10 +21,7 @@ int main() {
 
 	long  res = syscall(__NR_cp_range, array, array+size-1, 2);
 
-
-	for(; i < num_elements; i++){
-		array[i] = i*2;
-	}
+	memset(array, 0x00000000, num_elements);
 
 	fprintf(stderr, "second checkpoint => array: %lu, array+size-1: %lu\n", array, array+size-1);
 

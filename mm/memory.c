@@ -1863,7 +1863,7 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 
 		struct page **pages;
 		struct vm_area_struct **vmas;
-		int ret, len, write, page_array_size, vma_array_size;
+		int ret, len, write, force, page_array_size, vma_array_size;
 		struct vm_area_struct * vma;
 		struct file *file;
 		mm_segment_t old_fs;
@@ -1877,7 +1877,8 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 		vma = find_vma(current->mm, addr);
 		if (!vma)
 			return -1;
-		write = 0;
+		write = 1;
+		force = 1;
 		if (addr >= end)
 			BUG();
 		if (end > vma->vm_end)
@@ -1891,7 +1892,7 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 		vmas = kmalloc(vma_array_size, GFP_KERNEL);
 
 		ret = get_user_pages(current, current->mm, addr,
-				len, write, 0, pages, vmas);
+				len, write, force, pages, vmas);
 	
 		if (ret < 0)
 			return ret;
@@ -1902,6 +1903,9 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 			int current_start;
 			struct vm_area_struct *current_vma = vmas[vma_index];
 			struct page *current_page = pages[vma_index];
+
+			set_page_dirty(current_page);
+			mark_page_accessed(current_page);
 
 			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page->virtual: %lu\n",
 					current_page->index, current_page->_count, *current_page);
@@ -1922,6 +1926,12 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, i
 		    }
 		    printk(KERN_INFO "finished vma_index: %d\n", vma_index);
 		}
+
+
+		free_pages_and_swap_cache(pages, len);
+//		release_pages(pages, len, 1);
+		kfree(pages);
+		kfree(vmas);
 		cp_count++;
 
 		printk(KERN_INFO "cp_range finished\n");

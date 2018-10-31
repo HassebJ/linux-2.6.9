@@ -1743,64 +1743,6 @@ out:
 }
 
 
-int
-valid_page(struct page *pg, unsigned long pgstart) {
- if(!pg) {
-     printk(KERN_INFO "Page does not exist..\n");
-     return 0;
- }
-
- if (PageLocked(pg)) {
-     printk(KERN_INFO "Page locked: %lu\n", pgstart);
-     return 0;
- }
-
- if (PageError(pg)) {
-     printk(KERN_INFO "Page error: %lu\n", pgstart);
-     return 0;
- }
-
- if (PageReclaim(pg))
-     printk(KERN_INFO "Page is reclaim: %lu\n", pgstart);
- if (PageMappedToDisk(pg))
-     printk(KERN_INFO "Page is mappedtodisk: %lu\n", pgstart);
- if (PageSwapCache(pg))
-     printk(KERN_INFO "Page is swapcache: %lu\n", pgstart);
- if (PageCompound(pg))
-     printk(KERN_INFO "Page is compound: %lu\n", pgstart);
- if (PageNosave(pg))
-     printk(KERN_INFO "Page is nosave: %lu\n", pgstart);
- if (PageWriteback(pg))
-     printk(KERN_INFO "Page is writeback: %lu\n", pgstart);
- if (PagePrivate(pg))
-     printk(KERN_INFO "Page is private: %lu\n", pgstart);
- if (PageChecked(pg))
-     printk(KERN_INFO "Page is checked: %lu\n", pgstart);
- if (PageSlab(pg))
-     printk(KERN_INFO "Page is slab: %lu\n", pgstart);
- if (PageActive(pg))
-     printk(KERN_INFO "Page is active: %lu\n", pgstart);
- if (PageLRU(pg))
-     printk(KERN_INFO "Page is lru: %lu\n", pgstart);
- if (PageUptodate(pg))
-     printk(KERN_INFO "Page is uptodate: %lu\n", pgstart);
- if (PageReferenced(pg))
-     printk(KERN_INFO "Page is referenced: %lu\n", pgstart);
- if (PageHighMem(pg))
-     printk(KERN_INFO "Page is highmem: %lu\n", pgstart);
-
- if (PageReserved(pg)) {
-     printk(KERN_INFO "Page reserved: %lu\n", pgstart);
-     return 0;
- }
-
- if (pg == ZERO_PAGE(pgstart)) {
-     printk(KERN_INFO "Incremental: ZERO page: %lu\n", pgstart);
-     return 0;
- }
-
- return 1;
-}
 
 
 void write_addr_to_file(unsigned long address) {
@@ -1904,9 +1846,6 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
 			struct vm_area_struct *current_vma = vmas[vma_index];
 			struct page *current_page = pages[vma_index];
 
-//			set_page_dirty(current_page);
-//			mark_page_accessed(current_page);
-
 			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page->virtual: %lu\n",
 					current_page->index, current_page->_count, *current_page);
 
@@ -1920,8 +1859,8 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
 					|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
 
 					write_addr_to_file(current_start_addr);
-					set_page_dirty(current_page);
-					mark_page_accessed(current_page);
+//					set_page_dirty(current_page);
+//					mark_page_accessed(current_page);
 				} else {
 					printk(KERN_INFO "Address out of range \n");
 				}
@@ -1945,158 +1884,132 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
 asmlinkage long sys_inc_cp_range(unsigned long start_addr, unsigned long end_addr)
 {
 
-	if(cp_count == 0){
-	     sys_cp_range(start_addr, end_addr);
-	     return 0;
-	}
-
+//	if(cp_count == 0){
+//	     sys_cp_range(start_addr, end_addr);
+//	     return 0;
+//	}
+//
 
 	int flag = 1;
 	printk(KERN_INFO "Inside inc_cp_range\n");
-	if(flag == 0){
+	// get_user_pages implementation
 
-		printk(KERN_INFO "some non-implemented scheme");
-	}else{
-		// get_user_pages implementation
+	struct page **pages;
+	struct vm_area_struct **vmas;
+	int ret, len, write, force, page_array_size, vma_array_size;
+	struct vm_area_struct * vma;
+	struct file *file;
+	mm_segment_t old_fs;
+	int vma_index;
+	loff_t pos = 0;
 
-		struct page **pages;
-		struct vm_area_struct **vmas;
-		int ret, len, write, force, page_array_size, vma_array_size;
-		struct vm_area_struct * vma;
-		struct file *file;
-		mm_segment_t old_fs;
-		int vma_index;
-		loff_t pos = 0;
+	unsigned long addr = start_addr;
+	unsigned long end = end_addr;
 
-		unsigned long addr = start_addr;
-		unsigned long end = end_addr;
+	printk(KERN_INFO "start: %lu, end: %lu\n", addr, end);
+	vma = find_vma(current->active_mm, addr);
+	if (!vma)
+		return -1;
+	write = 0;
+	force = 0;
+	if (addr >= end)
+		BUG();
+	if (end > vma->vm_end)
+		BUG();
+	len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
 
-		printk(KERN_INFO "start: %lu, end: %lu\n", addr, end);
-		vma = find_vma(current->active_mm, addr);
-		if (!vma)
-			return -1;
-		write = 0;
-		force = 0;
-		if (addr >= end)
-			BUG();
-		if (end > vma->vm_end)
-			BUG();
-		len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
+	page_array_size = (len * sizeof(struct page *));
+	pages = kmalloc(page_array_size, GFP_KERNEL);
 
-		page_array_size = (len * sizeof(struct page *));
-		pages = kmalloc(page_array_size, GFP_KERNEL);
+	vma_array_size = (len * sizeof(struct vm_area_struct *));
+	vmas = kmalloc(vma_array_size, GFP_KERNEL);
 
-		vma_array_size = (len * sizeof(struct vm_area_struct *));
-		vmas = kmalloc(vma_array_size, GFP_KERNEL);
+	ret = get_user_pages(current, current->active_mm, addr,
+			len, write, force, pages, vmas);
 
-		ret = get_user_pages(current, current->active_mm, addr,
-				len, write, force, pages, vmas);
-	
-		if (ret < 0)
-			return ret;
+	if (ret < 0)
+		return ret;
 
-		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
+	printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
 
-		for(vma_index = 0; vma_index < len; vma_index++){
-			int current_start;
-			struct vm_area_struct *current_vma = vmas[vma_index];
-			struct page *current_page = pages[vma_index];
+	for(vma_index = 0; vma_index < len; vma_index++){
+		int current_start;
+		struct vm_area_struct *current_vma = vmas[vma_index];
+		struct page *current_page = pages[vma_index];
 
-			struct vm_area_struct *vma = current_vma;
-		    // Check for locked VM
-		    if (vma->vm_flags & VM_LOCKED) {
-		      vma = vma->vm_next;
-		      printk(KERN_INFO "Incremental: Skipping because VMA is locked...\n");
-		      continue;
-		    }
+		struct vm_area_struct *vma = current_vma;
 
-		    // Check for IO mappings
-		    if (vma->vm_flags & VM_IO) {
-		      vma = vma->vm_next;
-		      printk(KERN_INFO "Incremental: Skipping because VMA is I/O mapped...");
-		      continue;
-		    }
+		printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page: %lu\n",
+				current_page->index, current_page->_count, *current_page);
 
-		    // Check for permissions
-		    if (!(vma->vm_flags & VM_READ)) {
-		      vma = vma->vm_next;
-		      printk(KERN_INFO "Incremental: Skipping because VMA has no read permissions...");
-		      continue;
-		    }
+		printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
 
-			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page: %lu\n",
-					current_page->index, current_page->_count, *current_page);
+		unsigned long current_start_addr;
+		for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
 
-			printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
+			if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
+				|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
+				|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
 
-			unsigned long current_start_addr;
-		    for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
+				pgd_t *pgd;
+				pmd_t *pmd;
+				pte_t *ptep, pte;
 
-				if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
-					|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
-					|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
+				pgd = pgd_offset(current_vma->vm_mm, current_start_addr);
 
-					if (!valid_page(current_page, current_start_addr))
-					        continue;
-
-					pgd_t *pgd;
-					pmd_t *pmd;
-					pte_t *ptep, pte;
-//					pgd = pgd_offset(current->active_mm, current_start_addr);
-					pgd = pgd_offset(current_vma->vm_mm, current_start_addr);
+				if (!pgd || pgd_none(*pgd) || unlikely(pgd_bad(*pgd))){
+					printk(KERN_INFO "Pgd is none or bad\n");
+					continue;
+				}
 				
-					if (!pgd || pgd_none(*pgd) || unlikely(pgd_bad(*pgd))){
-						printk(KERN_INFO "Pgd is none or bad\n");
-						continue;
-					}
-					
-					pmd = pmd_offset(pgd, current_start_addr);
-					if (!pmd || pmd_none(*pmd) || unlikely(pmd_bad(*pmd))){
-						printk(KERN_INFO "Pmd is none or bad\n");
-						continue;
-					}
+				pmd = pmd_offset(pgd, current_start_addr);
+				if (!pmd || pmd_none(*pmd) || unlikely(pmd_bad(*pmd))){
+					printk(KERN_INFO "Pmd is none or bad\n");
+					continue;
+				}
 
-//					ptep = pte_alloc_kernel(current_vma->vm_mm, pmd, current_start_addr); kjh
-////					ptep = pte_offset_kernel(pmd, current_start_addr);
-////					ptep = pte_offset_map(pmd, current_start_addr);
-//
-//					if (!ptep){
-//						printk(KERN_INFO "Ptep is null \n");
-//						continue;
-//					}
+//					ptep = pte_alloc_kernel(current_vma->vm_mm, pmd, current_start_addr);
+				ptep = pte_offset_map(pmd, current_start_addr);
+
+				if (!ptep){
+					printk(KERN_INFO "Ptep is null \n");
+					continue;
+				}
 
 
-//					pte = *ptep;
-//					if(pte_dirty(pte)){
+				pte = *ptep;
+				int is_dirty = pte_dirty(pte);
+				pte_unmap(ptep);
+
+				if(is_dirty){
+					write_addr_to_file(current_start_addr);
+				}else{
+					printk(KERN_INFO "Page in range but NOT dirty\n");
+				}
+
+//					if(PageDirty(current_page)){
+//						printk(KERN_INFO "Page is dirty\n");
 //						write_addr_to_file(current_start_addr);
 //					}else{
 //						printk(KERN_INFO "Page in range but NOT dirty\n");
 //					}
 
-					if(PageDirty(current_page)){
-						printk(KERN_INFO "Page is dirty\n");
-						write_addr_to_file(current_start_addr);
-					}else{
-						printk(KERN_INFO "Page in range but NOT dirty\n");
-					}
 
-
-				} else {
-					printk(KERN_INFO "Address out of range \n");
-				}
-		    }
-		    printk(KERN_INFO "finished vma_index: %d\n", vma_index);
+			} else {
+				printk(KERN_INFO "Address out of range \n");
+			}
 		}
+		printk(KERN_INFO "finished vma_index: %d\n", vma_index);
+	}
 
 
 //		free_pages_and_swap_cache(pages, len);
-		kfree(pages);
-		kfree(vmas);
-		cp_count++;
+	kfree(pages);
+	kfree(vmas);
+	cp_count++;
 
-		printk(KERN_INFO "cp_range finished\n");
+	printk(KERN_INFO "cp_range finished\n");
 
-	}
 	return 0;
 }
 

@@ -902,5 +902,6 @@ ENTRY(sys_call_table)
 	.long sys_ni_syscall		/* reserved for kexec */
 	.long sys_waitid
 	.long sys_cp_range
+	.long sys_inc_cp_range
 
 syscall_table_size=(.-sys_call_table)

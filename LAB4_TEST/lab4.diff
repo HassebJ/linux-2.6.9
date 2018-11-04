@@ -1,0 +1,420 @@
+diff --git a/LAB4_TEST/basic_test.c b/LAB4_TEST/basic_test.c
+new file mode 100644
+index 00000000..1ffd6a79
+--- /dev/null
++++ b/LAB4_TEST/basic_test.c
+@@ -0,0 +1,34 @@
++#include "stdio.h"
++#include <linux/unistd.h>
++#include <sys/syscall.h>
++
++#define __NR_cp_range 285
++//_syscall1(long, toggle_fss, int, is_enabled)
++//_syscall1(long, toggle_fss_profiling, int, is_enabled)
++
++int main() {
++
++
++	int num_elements = 64;
++	int size = num_elements * sizeof(int);
++	int *array = malloc(size);
++	int i = 0;
++	for(; i < num_elements; i++){
++		array[i] = i*2;
++	}
++
++	fprintf(stderr, "inital checkpoint => array: %lu, array+size-1: %lu\n", array, array+size-1);
++
++	long  res = syscall(__NR_cp_range, array, array+size-1, 2);
++
++	memset(array, 0x00000000, size);
++
++	fprintf(stderr, "second checkpoint => array: %lu, array+size-1: %lu\n", array, array+size-1);
++
++	res = syscall(__NR_cp_range, array, array+size-1, 2);
++
++
++
++
++	return 0;
++}
+diff --git a/LAB4_TEST/test.c b/LAB4_TEST/test.c
+new file mode 100644
+index 00000000..5d512979
+--- /dev/null
++++ b/LAB4_TEST/test.c
+@@ -0,0 +1,33 @@
++#include "stdio.h"
++#include <linux/unistd.h>
++#include <sys/syscall.h>
++
++#define __NR_inc_cp_range 286
++
++
++int main() {
++
++
++	int num_elements = 1024;
++	int size = num_elements * sizeof(int);
++	int *array = malloc(size);
++	int i = 0;
++	for(; i < num_elements; i++){
++		array[i] = i*2;
++	}
++
++	fprintf(stderr, "inital checkpoint => array: %lu, array+size-1: %lu\n", array, array+size-1);
++
++	long  res = syscall(__NR_inc_cp_range, array, array+size-1, 2);
++
++	memset(array, 0x00000000, size);
++
++	fprintf(stderr, "second checkpoint => array: %lu, array+size-1: %lu\n", array, array+size-1);
++
++	res = syscall(__NR_inc_cp_range, array, array+size-1, 2);
++
++
++
++
++	return 0;
++}
+diff --git a/arch/i386/kernel/entry.S b/arch/i386/kernel/entry.S
+index 3a8c31ed..73002bf9 100644
+--- a/arch/i386/kernel/entry.S
++++ b/arch/i386/kernel/entry.S
+@@ -901,5 +901,7 @@ ENTRY(sys_call_table)
+ 	.long sys_mq_getsetattr
+ 	.long sys_ni_syscall		/* reserved for kexec */
+ 	.long sys_waitid
++	.long sys_cp_range
++	.long sys_inc_cp_range
+ 
+ syscall_table_size=(.-sys_call_table)
+diff --git a/arch/i386/mm/fault.c b/arch/i386/mm/fault.c
+index e9293847..fd6b2cc8 100644
+--- a/arch/i386/mm/fault.c
++++ b/arch/i386/mm/fault.c
+@@ -291,11 +291,15 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
+ 		down_read(&mm->mmap_sem);
+ 	}
+ 
++	// #########Need to get the VMA
+ 	vma = find_vma(mm, address);
++	// #########Accessed area that is illegal
+ 	if (!vma)
+ 		goto bad_area;
++	// ######### Whether the address looking for is within the vma area
+ 	if (vma->vm_start <= address)
+ 		goto good_area;
++	// #########
+ 	if (!(vma->vm_flags & VM_GROWSDOWN))
+ 		goto bad_area;
+ 	if (error_code & 4) {
+diff --git a/include/asm-i386/unistd.h b/include/asm-i386/unistd.h
+index be8c6ac5..809e23a1 100644
+--- a/include/asm-i386/unistd.h
++++ b/include/asm-i386/unistd.h
+@@ -290,8 +290,10 @@
+ #define __NR_mq_getsetattr	(__NR_mq_open+5)
+ #define __NR_sys_kexec_load	283
+ #define __NR_waitid		284
++#define __NR_cp_range		285
++#define __NR_inc_cp_range		286
+ 
+-#define NR_syscalls 285
++#define NR_syscalls 287
+ 
+ /* user-visible error numbers are in the range -1 - -124: see <asm-i386/errno.h> */
+ 
+diff --git a/include/linux/mm.h b/include/linux/mm.h
+index 65ff5b5e..24bb8d69 100644
+--- a/include/linux/mm.h
++++ b/include/linux/mm.h
+@@ -625,7 +625,7 @@ extern void remove_shrinker(struct shrinker *shrinker);
+ 
+ /*
+  * On a two-level page table, this ends up being trivial. Thus the
+- * inlining and the symmetry break with pte_alloc_map() that does all
++ * ≠≠inlining and the symmetry break with pte_alloc_map() that does all
+  * of this out-of-line.
+  */
+ static inline pmd_t *pmd_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+diff --git a/mm/memory.c b/mm/memory.c
+index 0a7013a2..c49f57af 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -82,6 +82,8 @@ EXPORT_SYMBOL(highmem_start_page);
+ EXPORT_SYMBOL(high_memory);
+ EXPORT_SYMBOL(vmalloc_earlyreserve);
+ 
++static int cp_count = 0;
++
+ /*
+  * We special-case the C-O-W ZERO_PAGE, because it's such
+  * a common occurrence (no need to read the page to know
+@@ -1038,6 +1040,8 @@ static inline void break_cow(struct vm_area_struct * vma, struct page * new_page
+  * We hold the mm semaphore and the page_table_lock on entry and exit
+  * with the page_table_lock released.
+  */
++
++// ######### lab4 needs to be implemented here
+ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
+ 	unsigned long address, pte_t *page_table, pmd_t *pmd, pte_t pte)
+ {
+@@ -1738,6 +1742,36 @@ out:
+ 	return pmd_offset(pgd, address);
+ }
+ 
++
++
++
++void write_addr_to_file(unsigned long address) {
++	unsigned long start_address;
++	mm_segment_t old_fs;
++	struct file *file;
++	loff_t pos = 0;
++
++	char *filename = kmalloc(32, GFP_KERNEL);
++	sprintf(filename, "/var/log/%d-%d", current->pid, cp_count);
++	old_fs = get_fs();
++	set_fs(get_ds());
++
++	file = filp_open(filename, O_WRONLY|O_CREAT, 0644);
++
++	printk(KERN_INFO "Writing new cp_file: %s\n", filename);
++	for (start_address = address; start_address < address + PAGE_SIZE; start_address++) {
++		long int *value = (unsigned long *) start_address;
++		char *data = kmalloc(32, GFP_KERNEL);
++		sprintf(data, "%lu ", *value);
++		vfs_write(file, data, strlen(data), &pos);
++		pos = pos+strlen(data);
++		kfree(data);
++	}
++	set_fs(old_fs);
++	filp_close(file,NULL);
++	kfree(filename);
++}
++
+ int make_pages_present(unsigned long addr, unsigned long end)
+ {
+ 	int ret, len, write;
+@@ -1759,6 +1793,226 @@ int make_pages_present(unsigned long addr, unsigned long end)
+ 	return ret == len ? 0 : -1;
+ }
+ 
++asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
++{
++	int	flag = 1;
++	printk(KERN_INFO "Inside cp_range\n");
++	if(flag == 0){
++
++		printk(KERN_INFO "some non-implemented scheme");
++	}else{
++		// get_user_pages implementation
++
++		struct page **pages;
++		struct vm_area_struct **vmas;
++		int ret, len, write, force, page_array_size, vma_array_size;
++		struct vm_area_struct * vma;
++		struct file *file;
++		mm_segment_t old_fs;
++		int vma_index;
++		loff_t pos = 0;
++
++		unsigned long addr = start_addr;
++		unsigned long end = end_addr;
++
++		printk(KERN_INFO "long: %lu, end: %lu\n", addr, end);
++		vma = find_vma(current->mm, addr);
++		if (!vma)
++			return -1;
++		write = 1;
++		force = 1;
++		if (addr >= end)
++			BUG();
++		if (end > vma->vm_end)
++			BUG();
++		len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
++
++		page_array_size = (len * sizeof(struct page *));
++		pages = kmalloc(page_array_size, GFP_KERNEL);
++
++		vma_array_size = (len * sizeof(struct vm_area_struct *));
++		vmas = kmalloc(vma_array_size, GFP_KERNEL);
++
++		ret = get_user_pages(current, current->mm, addr,
++				len, write, force, pages, vmas);
++
++		if (ret < 0)
++			return ret;
++
++		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
++
++		for(vma_index = 0; vma_index < len; vma_index++){
++			int current_start;
++			struct vm_area_struct *current_vma = vmas[vma_index];
++			struct page *current_page = pages[vma_index];
++
++			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page->virtual: %lu\n",
++					current_page->index, current_page->_count, *current_page);
++
++			printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
++
++			unsigned long current_start_addr;
++		    for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
++
++				if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
++					|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
++					|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
++
++					write_addr_to_file(current_start_addr);
++//					set_page_dirty(current_page);
++//					mark_page_accessed(current_page);
++				} else {
++					printk(KERN_INFO "Address out of range \n");
++				}
++		    }
++		    printk(KERN_INFO "finished vma_index: %d\n", vma_index);
++		}
++
++
++		free_pages_and_swap_cache(pages, len);
++//		release_pages(pages, len, 1);
++		kfree(pages);
++		kfree(vmas);
++		cp_count++;
++
++		printk(KERN_INFO "cp_range finished\n");
++
++	}
++	return 0;
++}
++
++asmlinkage long sys_inc_cp_range(unsigned long start_addr, unsigned long end_addr)
++{
++
++	int flag = 1;
++	printk(KERN_INFO "Inside inc_cp_range\n");
++	// get_user_pages implementation
++
++	struct page **pages;
++	struct vm_area_struct **vmas;
++	int ret, len, write, force, page_array_size, vma_array_size;
++	struct vm_area_struct * vma;
++	struct file *file;
++	mm_segment_t old_fs;
++	int vma_index;
++	loff_t pos = 0;
++
++	unsigned long addr = start_addr;
++	unsigned long end = end_addr;
++
++	printk(KERN_INFO "start: %lu, end: %lu\n", addr, end);
++	vma = find_vma(current->active_mm, addr);
++	if (!vma)
++		return -1;
++	write = 0;
++	force = 0;
++	if (addr >= end)
++		BUG();
++	if (end > vma->vm_end)
++		BUG();
++	len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
++
++	page_array_size = (len * sizeof(struct page *));
++	pages = kmalloc(page_array_size, GFP_KERNEL);
++
++	vma_array_size = (len * sizeof(struct vm_area_struct *));
++	vmas = kmalloc(vma_array_size, GFP_KERNEL);
++
++	ret = get_user_pages(current, current->active_mm, addr,
++			len, write, force, pages, vmas);
++
++	if (ret < 0)
++		return ret;
++
++	printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
++
++	for(vma_index = 0; vma_index < len; vma_index++){
++		int current_start;
++		struct vm_area_struct *current_vma = vmas[vma_index];
++		struct page *current_page = pages[vma_index];
++
++		struct vm_area_struct *vma = current_vma;
++
++		printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page: %lu\n",
++				current_page->index, current_page->_count, *current_page);
++
++		printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
++
++		unsigned long current_start_addr;
++		for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
++
++			if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
++				|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
++				|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
++
++				pgd_t *pgd;
++				pmd_t *pmd;
++				pte_t *ptep, pte;
++
++				pgd = pgd_offset(current_vma->vm_mm, current_start_addr);
++
++				if (!pgd || pgd_none(*pgd) || unlikely(pgd_bad(*pgd))){
++					printk(KERN_INFO "Pgd is none or bad\n");
++					continue;
++				}
++				
++				pmd = pmd_offset(pgd, current_start_addr);
++				if (!pmd || pmd_none(*pmd) || unlikely(pmd_bad(*pmd))){
++					printk(KERN_INFO "Pmd is none or bad\n");
++					continue;
++				}
++
++//					ptep = pte_alloc_kernel(current_vma->vm_mm, pmd, current_start_addr);
++				ptep = pte_offset_map(pmd, current_start_addr);
++
++				if (!ptep){
++					printk(KERN_INFO "Ptep is null \n");
++					continue;
++				}
++
++
++				pte = *ptep;
++				int is_dirty = pte_dirty(pte);
++				pte_unmap(ptep);
++
++				if(is_dirty){
++					write_addr_to_file(current_start_addr);
++				}else{
++					printk(KERN_INFO "Page in range but NOT dirty\n");
++				}
++
++//					if(PageDirty(current_page)){
++//						printk(KERN_INFO "Page is dirty\n");
++//						write_addr_to_file(current_start_addr);
++//					}else{
++//						printk(KERN_INFO "Page in range but NOT dirty\n");
++//					}
++
++
++			} else {
++				printk(KERN_INFO "Address out of range \n");
++			}
++		}
++		printk(KERN_INFO "finished vma_index: %d\n", vma_index);
++	}
++
++
++//		free_pages_and_swap_cache(pages, len);
++	kfree(pages);
++	kfree(vmas);
++	cp_count++;
++
++	printk(KERN_INFO "cp_range finished\n");
++
++	return 0;
++}
++
+ /* 
+  * Map a vmalloc()-space virtual address to the physical page.
+  */

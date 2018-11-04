@@ -1821,11 +1821,13 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
 			return -1;
 		write = 1;
 		force = 1;
-		if (addr >= end)
-			BUG();
-		if (end > vma->vm_end)
-			BUG();
+//		if (addr >= end)
+//			BUG();
+//		if (end > vma->vm_end)
+//			BUG();
 		len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
+
+		printk(KERN_INFO "Pages required:%d\n", len);
 
 		page_array_size = (len * sizeof(struct page *));
 		pages = kmalloc(page_array_size, GFP_KERNEL);
@@ -1836,10 +1838,12 @@ asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr)
 		ret = get_user_pages(current, current->mm, addr,
 				len, write, force, pages, vmas);
 
+		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
+
 		if (ret < 0)
 			return ret;
 
-		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
+
 
 		for(vma_index = 0; vma_index < len; vma_index++){
 			int current_start;

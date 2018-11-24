@@ -82,8 +82,6 @@ EXPORT_SYMBOL(highmem_start_page);
 EXPORT_SYMBOL(high_memory);
 EXPORT_SYMBOL(vmalloc_earlyreserve);
 
-static int cp_count = 0;
-
 /*
  * We special-case the C-O-W ZERO_PAGE, because it's such
  * a common occurrence (no need to read the page to know
@@ -1040,8 +1038,6 @@ static inline void break_cow(struct vm_area_struct * vma, struct page * new_page
  * We hold the mm semaphore and the page_table_lock on entry and exit
  * with the page_table_lock released.
  */
-
-// ######### lab4 needs to be implemented here
 static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	unsigned long address, pte_t *page_table, pmd_t *pmd, pte_t pte)
 {
@@ -1742,94 +1738,6 @@ out:
 	return pmd_offset(pgd, address);
 }
 
-
-int
-valid_page(struct page *pg, unsigned long pgstart) {
- if(!pg) {
-     printk(KERN_INFO "Page does not exist..\n");
-     return 0;
- }
-
- if (PageLocked(pg)) {
-     printk(KERN_INFO "Page locked: %lu\n", pgstart);
-     return 0;
- }
-
- if (PageError(pg)) {
-     printk(KERN_INFO "Page error: %lu\n", pgstart);
-     return 0;
- }
-
- if (PageReclaim(pg))
-     printk(KERN_INFO "Page is reclaim: %lu\n", pgstart);
- if (PageMappedToDisk(pg))
-     printk(KERN_INFO "Page is mappedtodisk: %lu\n", pgstart);
- if (PageSwapCache(pg))
-     printk(KERN_INFO "Page is swapcache: %lu\n", pgstart);
- if (PageCompound(pg))
-     printk(KERN_INFO "Page is compound: %lu\n", pgstart);
- if (PageNosave(pg))
-     printk(KERN_INFO "Page is nosave: %lu\n", pgstart);
- if (PageWriteback(pg))
-     printk(KERN_INFO "Page is writeback: %lu\n", pgstart);
- if (PagePrivate(pg))
-     printk(KERN_INFO "Page is private: %lu\n", pgstart);
- if (PageChecked(pg))
-     printk(KERN_INFO "Page is checked: %lu\n", pgstart);
- if (PageSlab(pg))
-     printk(KERN_INFO "Page is slab: %lu\n", pgstart);
- if (PageActive(pg))
-     printk(KERN_INFO "Page is active: %lu\n", pgstart);
- if (PageLRU(pg))
-     printk(KERN_INFO "Page is lru: %lu\n", pgstart);
- if (PageUptodate(pg))
-     printk(KERN_INFO "Page is uptodate: %lu\n", pgstart);
- if (PageReferenced(pg))
-     printk(KERN_INFO "Page is referenced: %lu\n", pgstart);
- if (PageHighMem(pg))
-     printk(KERN_INFO "Page is highmem: %lu\n", pgstart);
-
- if (PageReserved(pg)) {
-     printk(KERN_INFO "Page reserved: %lu\n", pgstart);
-     return 0;
- }
-
- if (pg == ZERO_PAGE(pgstart)) {
-     printk(KERN_INFO "Incremental: ZERO page: %lu\n", pgstart);
-     return 0;
- }
-
- return 1;
-}
-
-
-void write_addr_to_file(unsigned long address) {
-	unsigned long start_address;
-	mm_segment_t old_fs;
-	struct file *file;
-	loff_t pos = 0;
-
-	char *filename = kmalloc(32, GFP_KERNEL);
-	sprintf(filename, "/var/log/%d-%d", current->pid, cp_count);
-	old_fs = get_fs();
-	set_fs(get_ds());
-
-	file = filp_open(filename, O_WRONLY|O_CREAT, 0644);
-
-	printk(KERN_INFO "Writing new cp_file: %s\n", filename);
-	for (start_address = address; start_address < address + PAGE_SIZE; start_address++) {
-		long int *value = (unsigned long *) start_address;
-		char *data = kmalloc(32, GFP_KERNEL);
-		sprintf(data, "%lu ", *value);
-		vfs_write(file, data, strlen(data), &pos);
-		pos = pos+strlen(data);
-		kfree(data);
-	}
-	set_fs(old_fs);
-	filp_close(file,NULL);
-	kfree(filename);
-}
-
 int make_pages_present(unsigned long addr, unsigned long end)
 {
 	int ret, len, write;
@@ -1849,95 +1757,6 @@ int make_pages_present(unsigned long addr, unsigned long end)
 	if (ret < 0)
 		return ret;
 	return ret == len ? 0 : -1;
-}
-
-asmlinkage long sys_cp_range(unsigned long start_addr, unsigned long end_addr, int flag)
-{
-//	flag = 1;
-	printk(KERN_INFO "Inside cp_range\n");
-	if(flag == 0){
-
-		printk(KERN_INFO "some non-implemented scheme");
-	}else{
-		// get_user_pages implementation
-
-		struct page **pages;
-		struct vm_area_struct **vmas;
-		int ret, len, write, force, page_array_size, vma_array_size;
-		struct vm_area_struct * vma;
-		struct file *file;
-		mm_segment_t old_fs;
-		int vma_index;
-		loff_t pos = 0;
-
-		unsigned long addr = start_addr;
-		unsigned long end = end_addr;
-
-		printk(KERN_INFO "long: %lu, end: %lu\n", addr, end);
-		vma = find_vma(current->mm, addr);
-		if (!vma)
-			return -1;
-		write = 1;
-		force = 1;
-		if (addr >= end)
-			BUG();
-		if (end > vma->vm_end)
-			BUG();
-		len = (end+PAGE_SIZE-1)/PAGE_SIZE  -  addr/PAGE_SIZE;
-
-		page_array_size = (len * sizeof(struct page *));
-		pages = kmalloc(page_array_size, GFP_KERNEL);
-
-		vma_array_size = (len * sizeof(struct vm_area_struct *));
-		vmas = kmalloc(vma_array_size, GFP_KERNEL);
-
-		ret = get_user_pages(current, current->mm, addr,
-				len, write, force, pages, vmas);
-	
-		if (ret < 0)
-			return ret;
-
-		printk(KERN_INFO "Pages returned: %d, pages_requested: %d\n", ret, len);
-
-		for(vma_index = 0; vma_index < len; vma_index++){
-			int current_start;
-			struct vm_area_struct *current_vma = vmas[vma_index];
-			struct page *current_page = pages[vma_index];
-
-			set_page_dirty(current_page);
-			mark_page_accessed(current_page);
-
-			printk(KERN_INFO "current_page->index: %lu, current_page->count: %lu, current_page->virtual: %lu\n",
-					current_page->index, current_page->_count, *current_page);
-
-			printk(KERN_INFO "current_vma->vm_start: %lu, current_vma->vm_end: %lu \n", current_vma->vm_start, current_vma->vm_end);
-
-			unsigned long current_start_addr;
-		    for (current_start_addr = current_vma->vm_start; current_start_addr < current_vma->vm_end; current_start_addr += PAGE_SIZE) {
-
-				if ((current_start_addr <= addr && current_start_addr+PAGE_SIZE >= end)
-					|| (current_start_addr <= addr && current_start_addr+PAGE_SIZE <= end)
-					|| (current_start_addr >= addr && current_start_addr+PAGE_SIZE <= end)){
-
-					write_addr_to_file(current_start_addr);
-				} else {
-					printk(KERN_INFO "Address out of range \n");
-				}
-		    }
-		    printk(KERN_INFO "finished vma_index: %d\n", vma_index);
-		}
-
-
-		free_pages_and_swap_cache(pages, len);
-//		release_pages(pages, len, 1);
-		kfree(pages);
-		kfree(vmas);
-		cp_count++;
-
-		printk(KERN_INFO "cp_range finished\n");
-
-	}
-	return 0;
 }
 
 /* 

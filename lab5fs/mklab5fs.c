@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
     /* Write superblock */
     sb.s_magic = LAB5FS_MAGIC;
     sb.s_blocksize = LAB5FS_BLOCKSIZE;
-    sb.s_blocksize_bits = 10;
+    sb.s_blocksize_bits = 9;
 //    sb.max_bytes = sb.s_blocksize;
 //    sb.inode_bitmap_loc = BLOCK_N(1, sb.blocksize);
 //    sb.data_bitmap_loc = BLOCK_N(2, sb.blocksize);
@@ -91,10 +91,11 @@ int main(int argc, char *argv[]) {
         root_inode.i_atime = ctime;
         root_inode.i_mtime = ctime;
         root_inode.i_ctime = ctime;
-        root_inode.i_sblock = 1;
-        root_inode.i_eblock = 1;
+        root_inode.i_sblock = 0;
+        root_inode.i_eblock = 0;
         root_inode.i_nlink = 1;
-//        root_inode.blocks = (root_inode.i_sblock == 0) ? 0 : 1;
+        root_inode.i_num_blocks = 0;
+        root_inode.i_size = 2;
 //        i.is_hard_link     = 0;
 //        i.block_to_link_to = 0;
 //        strcpy(i.name, fname);

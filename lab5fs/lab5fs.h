@@ -11,8 +11,12 @@
 
 /* some random number */
 #define LAB5FS_MAGIC		0x856958f6
-#define LAB5FS_BLOCKSIZE	1024
+#define LAB5FS_BLOCKSIZE	512
 
+#define INODE_BITMAP_BLOCK			1
+#define DATA_BITMAP_BLOCK			2
+//    sb.inode_bitmap_loc = BLOCK_N(1, sb.blocksize);
+//    sb.data_bitmap_loc = BLOCK_N(2, sb.blocksize);
 /* Macros */
 #define BYTES_TO_BLOCKS(loc, blocksize) (loc/blocksize)
 #define BLOCK_N(n, blocksize)           (n*blocksize)
@@ -25,6 +29,8 @@ struct lab5fs_inode {
 	unsigned short i_unused;
 	unsigned int i_sblock;
 	unsigned int i_eblock;
+	unsigned int i_num_blocks;
+	unsigned int i_size;
 	unsigned int i_eoffset;
 	unsigned int i_vtype;
 	unsigned int i_mode;

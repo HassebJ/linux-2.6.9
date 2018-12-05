@@ -33,18 +33,9 @@ int main(int argc, char *argv[]) {
     sb.s_magic = LAB5FS_MAGIC;
     sb.s_blocksize = LAB5FS_BLOCKSIZE;
     sb.s_blocksize_bits = 9;
-//    sb.max_bytes = sb.s_blocksize;
-//    sb.inode_bitmap_loc = BLOCK_N(1, sb.blocksize);
-//    sb.data_bitmap_loc = BLOCK_N(2, sb.blocksize);
-//    sb.inode_loc = BLOCK_N(3, sb.blocksize);
-//    sb.data_loc = BLOCK_N(129, sb.blocksize);
-//    sb.root_inode_loc = sb.inode_loc;
-//    sb.blocks_total = 2441;
+
     sb.s_inode_blocks_total = 1250;
-//    sb.data_blocks_total  = sb.blocks_total - sb.inode_blocks_total;
-//    sb.data_blocks_free   = sb.data_blocks_total;
     sb.s_inode_blocks_free  = sb.s_inode_blocks_total - 1;
-//    sb.last_data_block = 0;
 
         struct timespec ctime;
         clock_gettime(CLOCK_REALTIME, &ctime);
@@ -63,21 +54,6 @@ int main(int argc, char *argv[]) {
         root_inode.i_size = 2;
 //        memset(root_inode.name, '\0', LAB5FS_NAMELEN);
         strcpy(root_inode.name, "/");
-//        i.is_hard_link     = 0;
-//        i.block_to_link_to = 0;
-//        strcpy(i.name, fname);
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     fwrite(&sb, 1, sizeof(struct lab5fs_sb), file);

@@ -12,6 +12,8 @@
 /* some random number */
 #define LAB5FS_MAGIC		0x856958f6
 #define LAB5FS_BLOCKSIZE	512
+#define LAB5FS_NAMELEN		36
+#define LAB5FS_MAXLINKS		3
 
 #define INODE_BITMAP_BLOCK			1
 #define DATA_BITMAP_BLOCK			2
@@ -31,16 +33,15 @@ struct lab5fs_inode {
 	unsigned int i_eblock;
 	unsigned int i_num_blocks;
 	unsigned int i_size;
-	unsigned int i_eoffset;
-	unsigned int i_vtype;
 	unsigned int i_mode;
 	__signed__ int i_uid;
 	__signed__ int i_gid;
 	unsigned int i_nlink;
-	unsigned int i_atime;
-	unsigned int i_mtime;
-	unsigned int i_ctime;
-	unsigned int i_padding[4];
+	struct timespec i_atime;
+	struct timespec i_mtime;
+	struct timespec i_ctime;
+	char name[LAB5FS_NAMELEN];
+	char alias[LAB5FS_MAXLINKS][LAB5FS_NAMELEN];
 };
 
 #define BFS_NAMELEN		14
@@ -59,6 +60,8 @@ struct lab5fs_sb {
 	unsigned int s_blocksize_bits;
 	unsigned int s_start;
 	unsigned int s_end;
+	unsigned int s_inode_blocks_total;
+	unsigned int s_inode_blocks_free;
 	__signed__ int s_from;
 	__signed__ int s_to;
 	__signed__ int s_bfrom;

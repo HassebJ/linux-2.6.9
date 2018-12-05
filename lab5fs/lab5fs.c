@@ -25,12 +25,106 @@ MODULE_VERSION("0.01");
 
 /* Prototypes for device functions */
 void lab5fs_read_inode(struct inode *inode);
+int lab5fs_write_inode(struct inode *inode, int unused);
 struct inode *lab5fs_get_inode(struct super_block *sb, int mode, dev_t dev);
-static int major_num;
-static int device_open_count = 0;
-static char msg_buffer[MSG_BUFFER_LEN];
-static char *msg_ptr;
+int lab5fs_readdir(struct file *filp, void *dirent, filldir_t filldir);
+void mark_inode_unused(struct inode *inode);
+
 static struct inode * root_inode;
+static struct super_block *g_sb;
+
+
+
+//int lab5fs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+//{
+//        struct dentry *dentry = filp->f_dentry;
+//        struct inode *dir = filp->f_dentry->d_inode;
+//        struct super_block* sb = dir->i_sb;
+//        int need_revalidation = (filp->f_version != dir->i_version);
+//		struct buffer_head *bh = NULL;
+//		int data_block_num = 0;
+//		struct stamfs_dir_rec *dir_rec;
+//		int err = 0;
+//		int over;
+//
+//        printk(KERN_INFO "lab5fsfs: readdir, file=%s, pos=%llu, dir->i_size:pos=%lu\n",
+//                             dentry->d_name.name, filp->f_pos, dir->i_size);
+//
+//        if (filp->f_pos > dir->i_size) {
+//        	printk(KERN_INFO "lab5fs: file pos larger then dir size.\n");
+//                 goto done;
+//         }
+//
+//        /* TODO - what does this revalidation, and version information,
+//         * mean at all? */
+//        if (need_revalidation) {
+//                /* TODO - make sure 'pos' points to the beginning of a dir rec. */
+//                need_revalidation = 0;
+//        }
+//
+//
+//        /* special handling for '.' and '..' */
+//        if (filp->f_pos == 0) {
+//        	printk(KERN_INFO
+//                           "lab5fs: readdir, f_pos == 0, adding '.', ino=%lu\n",
+//                           dir->i_ino);
+//                over = filldir(dirent, ".", 1, filp->f_pos,
+////                               dir->i_ino, DT_DIR);
+//                			   19, DT_DIR);
+//                if (over < 0)
+//                        goto done;
+//                filp->f_pos++;
+//        }
+//        if (filp->f_pos == 1) {
+//        	printk(KERN_INFO  "lab5fs: readdir, f_pos == 1, "
+//                                     "adding '..', ino=%lu\n",
+//                                     dentry->d_parent->d_inode->i_ino);
+//                over = filldir(dirent, "..", 2, filp->f_pos,
+////                               dentry->d_parent->d_inode->i_ino, DT_DIR);
+//                			   20, DT_DIR);
+//                if (over < 0)
+//                        goto done;
+//                filp->f_pos++;
+//        }
+//    	struct dentry *subdir;
+//    	unsigned char d_type = DT_UNKNOWN;
+//    	struct list_head *i;
+//    	list_for_each(i, &dentry->d_subdirs) {
+//    		struct dentry *subdir = list_entry(i, struct dentry, d_child);
+//
+//    		switch (subdir->d_inode->i_mode & S_IFMT) {
+//    		case S_IFREG:
+//    			d_type = DT_REG;
+//    			break;
+//    		case S_IFDIR:
+//    			d_type = DT_DIR;
+//    			break;
+//    		case S_IFLNK:
+//    			break;
+//    		default:
+//    			printk(KERN_INFO "UNKOWN INODE TYPE");
+//    			break;
+//    		}
+//    		printk(KERN_INFO  "lab5fs: readdir, f_pos == %lld, "
+//                            "adding '%s', ino=%u\n",
+//                            filp->f_pos, subdir->d_iname,
+//							subdir->d_inode->i_ino);
+//    		over = filldir(dirent, subdir->d_iname,DNAME_INLINE_LEN_MIN, filp->f_pos, subdir->d_inode->i_ino, d_type);
+//    		if (over < 0)
+//				goto done;
+//    		filp->f_pos++;
+//    	    // do something with obj
+//    	}
+//
+//  done:
+//        filp->f_version = dir->i_version;
+//        if (bh)
+//                brelse(bh);
+////        filp->f_pos = 0;
+//        return err;
+//}
+//
+
 
 inline unsigned long ino_num_to_blk_num(ino_t ino_num) {
   return (BLOCK_N(INODE_BITMAP_BLOCK, LAB5FS_BLOCKSIZE) / LAB5FS_BLOCKSIZE) + ino_num;
@@ -39,110 +133,166 @@ inline unsigned long ino_num_to_blk_num(ino_t ino_num) {
 static int
 lab5fs_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 {
+	char *map = NULL;
+	struct buffer_head *bh = NULL;
+	struct buffer_head *bh_meta = NULL;
+	struct lab5fs_inode ino_meta;
+	struct lab5fs_sb *sb = NULL;
+	int ino_num = -1;
+
+	/* Find first place open in bitmap for inode */
+
+	bh = sb_bread(dir->i_sb, 1);
+//	bh = sb_read(g_bdev, 1, l5sb->blocksize);
+	map = (char*) bh->b_data;
+
+	spin_lock(&dir->i_lock);
+	dir->i_size++;
+	printk(KERN_INFO "INCREASED side if i_ino: %d, to size: %lu\n", dir->i_ino, dir->i_size);
+	spin_unlock(&dir->i_lock);
+
+
+
+	ino_num = find_first_free_index(map);
+	printk(KERN_INFO "Found bit to assign for inum: %d\n", ino_num);
+
+	if (ino_num <= 0) {
+		printk(KERN_INFO "Couldn't get a free bit\n");
+		return -ENOSPC;
+	}
+
+	printk(KERN_INFO "SB CHECK in mknod= %lu\n", dir->i_sb->s_magic);
 	struct inode * inode = lab5fs_get_inode(dir->i_sb, mode, dev);
 	int error = -ENOSPC;
 
 	if (inode) {
+		/* Create new inode metadata on disk */
+		printk(KERN_INFO "File name is %s\n", dentry->d_iname);
+		printk(KERN_INFO "ino_num by default: %d\n", inode->i_ino);
+		inode->i_ino = ino_num;
+
+		bh_meta = sb_bread(dir->i_sb, ino_num+3);
+		strcpy(ino_meta.name, dentry->d_iname);
+		printk(KERN_INFO "Copied string name\n");;
+//		ino_meta.block_to_link_to = 0;
+//		ino_meta.is_hard_link = 0;
+		ino_meta.i_mode = mode;
+		memcpy(bh_meta->b_data, &ino_meta, sizeof(struct lab5fs_inode));
+		mark_buffer_dirty(bh_meta);
+		brelse(bh_meta);
+
+		/* Mark bit in bitmap as now-used */
+		printk(KERN_INFO "Marking bitmap for inode as used\n");
+		map[ino_num] = 1; //FIXME: Look at me
+		mark_buffer_dirty(bh);
+		brelse(bh);
+
 		if (dir->i_mode & S_ISGID) {
 			inode->i_gid = dir->i_gid;
-			if (S_ISDIR(mode))
+			if (S_ISDIR(mode)){
 				inode->i_mode |= S_ISGID;
+				inode->i_size=2;
+			}
 		}
+
+		/* Mark actual inode as needing to be written to disk */
+		printk(KERN_INFO "Marking new inode as need-to-be-written\n");
+		printk(KERN_INFO "insert to hash\n");
+		insert_inode_hash(inode);
+		printk(KERN_INFO "mark dirty\n");
+		mark_inode_dirty(inode);
+		printk(KERN_INFO "done marking dirty...\n");
+
+		/* Modify free count in sb */
+//		bh = __bread(g_bdev, 0, l5sb->blocksize);
+		bh = sb_bread(dir->i_sb, 0);
+		sb = (struct lab5fs_sb *) bh->b_data;
+		sb->s_inode_blocks_free--;
+		mark_buffer_dirty(bh);
+//		memcpy(l5sb, sb, sizeof(struct lab5fs_sb));
+		brelse(bh);
+
 		d_instantiate(dentry, inode);
 		dget(dentry);	/* Extra count - pin the dentry in core */
 		error = 0;
+        if (1) {
+                ll_rw_block(WRITE, 1, &bh_meta);
+                wait_on_buffer(bh_meta);
+                if (buffer_req(bh_meta) && !buffer_uptodate(bh_meta)) {
+                        printk("IO error syncing inode %ld\n", ino_num);
+                        error = -EIO;
+                }
+        }
+
 	}
 	return error;
 }
 
-int lab5fs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+
+//old working lookup
+struct dentry *lab5fs_lookup(struct inode *dir, struct dentry *dentry,
+		struct nameidata *nd)
 {
-        struct dentry *dentry = filp->f_dentry;
-        struct inode *dir = filp->f_dentry->d_inode;
-        struct super_block* sb = dir->i_sb;
-        int need_revalidation = (filp->f_version != dir->i_version);
-		struct buffer_head *bh = NULL;
-		int data_block_num = 0;
-		struct stamfs_dir_rec *dir_rec;
-		int err = 0;
-		int over;
+	printk(KERN_INFO "********Inside lab5fs_lookup, looking for: %s ********\n", dentry->d_iname);
+	//  struct buffer_head *bh = __bread(g_bdev, 1, l5sb->blocksize);
+	struct buffer_head *bh = sb_bread(dir->i_sb, 1);
+	char *map = (char *) bh->b_data;
+	int i;
+	struct inode *_inode = NULL;
 
-        printk(KERN_INFO "lab5fsfs: readdir, file=%s, pos=%llu, dir->i_size:pos=%llu\n",
-                             dentry->d_name.name, filp->f_pos, dir->i_size);
+	for (i = 0; i < LAB5FS_BLOCKSIZE; i++) {
+		int block = 3 + i;
+		int is_valid = (map[i] == 1);
 
-        if (filp->f_pos > dir->i_size) {
-        	printk(KERN_INFO "lab5fs: file pos larger then dir size.\n");
-                 goto done;
-         }
+		if (is_valid) {
+			struct buffer_head *bh2 = sb_bread(dir->i_sb, block);
+			struct lab5fs_inode *ino = (struct lab5fs_inode *) bh2->b_data;
 
-        /* TODO - what does this revalidation, and version information,
-         * mean at all? */
-        if (need_revalidation) {
-                /* TODO - make sure 'pos' points to the beginning of a dir rec. */
-                need_revalidation = 0;
-        }
+			_inode = iget(dir->i_sb, i);
+
+			if (strcmp(ino->name, dentry->d_iname) == 0) {
+				/* Found file */
+				printk(KERN_INFO "Found as on disk_ino_name\n");
+				if (!_inode) {
+					return ERR_PTR(-EACCES);
+				}
 
 
-        /* special handling for '.' and '..' */
-        if (filp->f_pos == 0) {
-        	printk(KERN_INFO
-                           "lab5fs: readdir, f_pos == 0, adding '.', ino=%lu\n",
-                           dir->i_ino);
-                over = filldir(dirent, ".", 1, filp->f_pos,
-//                               dir->i_ino, DT_DIR);
-                			   19, DT_DIR);
-                if (over < 0)
-                        goto done;
-                filp->f_pos++;
-        }
-        if (filp->f_pos == 1) {
-        	printk(KERN_INFO  "lab5fs: readdir, f_pos == 1, "
-                                     "adding '..', ino=%lu\n",
-                                     dentry->d_parent->d_inode->i_ino);
-                over = filldir(dirent, "..", 2, filp->f_pos,
-//                               dentry->d_parent->d_inode->i_ino, DT_DIR);
-                			   20, DT_DIR);
-                if (over < 0)
-                        goto done;
-                filp->f_pos++;
-        }
-    	struct dentry *subdir;
-    	unsigned char d_type = DT_UNKNOWN;
-    	struct list_head *i;
-    	list_for_each(i, &dentry->d_subdirs) {
-    		struct dentry *subdir = list_entry(i, struct dentry, d_child);
 
-    		switch (subdir->d_inode->i_mode & S_IFMT) {
-    		case S_IFREG:
-    			d_type = DT_REG;
-    			break;
-    		case S_IFDIR:
-    			d_type = DT_DIR;
-    			break;
-    		case S_IFLNK:
-    			break;
-    		default:
-    			printk(KERN_INFO "UNKOWN INODE TYPE");
-    			break;
-    		}
-    		printk(KERN_INFO  "lab5fs: readdir, f_pos == %lld, "
-                            "adding '%s', ino=%u\n",
-                            filp->f_pos, subdir->d_iname,
-							subdir->d_inode->i_ino);
-    		over = filldir(dirent, subdir->d_iname,DNAME_INLINE_LEN_MIN, filp->f_pos, subdir->d_inode->i_ino, d_type);
-    		if (over < 0)
-				goto done;
-    		filp->f_pos++;
-    	    // do something with obj
-    	}
+				d_add(dentry, _inode);
+				break;
+			}else{
+				if (!_inode) {
+					return ERR_PTR(-EACCES);
+				}
+				struct list_head *head, *next, *tmp;
+				struct dentry *alias, *discon_alias=NULL;
 
-  done:
-        filp->f_version = dir->i_version;
-        if (bh)
-                brelse(bh);
-//        filp->f_pos = 0;
-        return err;
+				head = &_inode->i_dentry;
+				next = _inode->i_dentry.next;
+				int i = 0;
+				while (next != head) {
+					tmp = next;
+					next = tmp->next;
+					prefetch(next);
+					alias = list_entry(tmp, struct dentry, d_alias);
+					printk(KERN_INFO "Looking at alias: %s\n", alias->d_iname);
+					if(strcmp(alias->d_iname, dentry->d_iname) == 0){
+						printk(KERN_INFO "Its a match!\n");
+						d_add(dentry, _inode);
+						break;
+					}
+				}
+
+
+			}
+			brelse(bh2);
+		}
+	}
+	brelse(bh);
+	return NULL;
 }
+
 //
 //struct dentry *lab5fs_lookup(struct inode *dir, struct dentry *dentry)
 //{
@@ -196,18 +346,18 @@ static int simple_delete_dentry(struct dentry *dentry)
 }
 
 
-struct dentry *lab5fs_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd)
-{
-	static struct dentry_operations simple_dentry_operations = {
-		.d_delete = simple_delete_dentry,
-	};
-
-	if (dentry->d_name.len > NAME_MAX)
-		return ERR_PTR(-ENAMETOOLONG);
-	dentry->d_op = &simple_dentry_operations;
-	d_add(dentry, NULL);
-	return NULL;
-}
+//struct dentry *lab5fs_lookup(struct inode *dir, struct dentry *dentry, struct nameidata *nd)
+//{
+//	static struct dentry_operations simple_dentry_operations = {
+//		.d_delete = simple_delete_dentry,
+//	};
+//
+//	if (dentry->d_name.len > NAME_MAX)
+//		return ERR_PTR(-ENAMETOOLONG);
+//	dentry->d_op = &simple_dentry_operations;
+//	d_add(dentry, NULL);
+//	return NULL;
+//}
 
 static int lab5fs_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 {
@@ -230,18 +380,6 @@ static int lab5fs_create(struct inode *dir, struct dentry *dentry, int mode, str
 	return lab5fs_mknod(dir, dentry, mode | S_IFREG, 0);
 }
 
-static int lab5fs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
-{
-	struct inode *inode = old_dentry->d_inode;
-
-	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
-	inode->i_nlink++;
-	atomic_inc(&inode->i_count);
-	dget(dentry);
-	d_instantiate(dentry, inode);
-	return 0;
-}
-
 void lab5fs_put_super (struct super_block *sb)
 {
 	printk(KERN_INFO "INSIDE lab5fs_put_super\n");
@@ -257,10 +395,10 @@ void lab5fs_put_super (struct super_block *sb)
 		}
 
 	}
-	if(root_inode){
-		printk(KERN_INFO "iput on root_indode called");
-		iput(root_inode);
-	}
+//	if(root_inode){
+//		printk(KERN_INFO "iput on root_indode called");
+//		iput(root_inode);
+//	}
 
 
 //	sb_  ino->u.generic_ip = NULL;
@@ -282,14 +420,105 @@ void lab5fs_put_super (struct super_block *sb)
 //        MOD_DEC_USE_COUNT;
 }
 
+static int lab5fs_link(struct dentry *old_dentry, struct inode *dir, struct dentry *dentry)
+{
+	printk(KERN_INFO "INSIDE LINK\n");
+	struct inode *inode = old_dentry->d_inode;
+
+	spin_lock(&dir->i_lock);
+	dir->i_size++;
+	printk(KERN_INFO "INCREASED side if i_ino: %d, to size: %lu", dir->i_ino, dir->i_size);
+	spin_unlock(&dir->i_lock);
+
+	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
+	inode->i_nlink++;
+	atomic_inc(&inode->i_count);
+	dget(dentry);
+	printk(KERN_INFO "dentry->d_iname: %s, dentry.count:%d\n",dentry->d_iname, atomic_read(&dentry->d_count));
+	d_instantiate(dentry, inode);
+	mark_inode_dirty(inode);
+	mark_inode_dirty(dir);
+	return 0;
+}
+static inline void dentry_iput(struct inode *inode, char * name )
+{
+	struct list_head *head, *next, *tmp;
+	struct dentry *alias, *discon_alias=NULL;
+
+	printk(KERN_INFO "Inside dentry_iput\n");
+	head = &inode->i_dentry;
+	next = inode->i_dentry.next;
+	int i = 0;
+	char * last_dname = NULL;
+	while (next != head) {
+		tmp = next;
+		next = tmp->next;
+		prefetch(next);
+		alias = list_entry(tmp, struct dentry, d_alias);
+		printk(KERN_INFO "Found alias: %s\n", alias->d_iname);
+		if(strncmp(alias->d_iname, name, LAB5FS_NAMELEN) == 0){
+			printk(KERN_INFO "REMOVING alias: %s\n", alias->d_iname);
+			list_del_init(&alias->d_alias);
+		}
+
+
+	}
+}
 
 int lab5fs_unlink(struct inode *dir, struct dentry *dentry)
 {
+	printk(KERN_INFO "INSIDE UNLINK\n");
 	struct inode *inode = dentry->d_inode;
+	int dec_size = 1;
+
+	//ATTEMPT to remove all refferences to an inode once its main name was deleted, that is not the expected behavior of hardlinks so removing it
+//	char *map = NULL;
+//	struct buffer_head *bh = NULL;
+//
+//	bh = sb_bread(dir->i_sb, 1);
+//	map = (char *) bh->b_data;
+//
+//	int block = 3 + inode->i_ino;
+//	int is_valid = (map[inode->i_ino] == 1);
+//
+//	int dec_size = 1;
+//	if (is_valid) {
+//		int block_num = ino_num_to_blk_num(inode->i_ino);
+//		struct buffer_head *bh2 = sb_bread(dir->i_sb, block_num);
+//		struct lab5fs_inode *ino = (struct lab5fs_inode *) bh2->b_data;
+//		printk(KERN_INFO "OnDisk name: %s\n", ino->name);
+//		if(strncmp(dentry->d_name.name, ino->name, LAB5FS_NAMELEN) == 0){
+//			printk(KERN_INFO "DELETE main file\n");
+//			dec_size = inode->i_nlink;
+//		}else{
+//			printk(KERN_INFO "Unlink hardlink only\n");
+//		}
+//		brelse(bh2);
+//	}
+//	brelse(bh);
+
+
+
+	//TODO TEST ME!!!
+	spin_lock(&dir->i_lock);
+	dir->i_size -= dec_size;
+	printk(KERN_INFO "DECREASED side if i_ino: %d, to size: %lu, dentry->name: %s, dentry.count: %d\n", dir->i_ino, dir->i_size, dentry->d_iname, atomic_read(&dentry->d_count));
+	spin_unlock(&dir->i_lock);
+	if(dentry->d_name.len > 0){
+		printk(KERN_INFO "dentry.d_name.name: %s\n", dentry->d_name.name);
+		dentry_iput(inode, dentry->d_name.name);
+	}
 
 	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
-	inode->i_nlink--;
+	inode->i_nlink += dec_size;
 	dput(dentry);
+	d_delete(dentry);
+	mark_inode_dirty(inode);
+	mark_inode_dirty(dir);
+
+	if(inode->i_nlink == 0){
+		mark_inode_unused(inode);
+	}
 	return 0;
 }
 
@@ -314,8 +543,7 @@ static struct inode_operations lab5fs_file_inode_operations = {
 
 static struct inode_operations lab5fs_dir_inode_operations = {
 	.create		= lab5fs_create,
-//	.lookup		= lab5fs_lookup,
-	.lookup		= simple_lookup,
+	.lookup		= lab5fs_lookup,
 	.link		= lab5fs_link,
 	.unlink		= lab5fs_unlink,
 //	.symlink	= lab5fs_symlink,
@@ -327,10 +555,187 @@ static struct inode_operations lab5fs_dir_inode_operations = {
 
 static struct super_operations lab5fs_ops = {
 	.read_inode = lab5fs_read_inode,
+	.write_inode = lab5fs_write_inode,
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
 	.put_super = lab5fs_put_super,
 };
+
+int find_first_free_index(const char *map)
+{
+  /* Look for free bit */
+  int i;
+  for (i = 0; i < LAB5FS_BLOCKSIZE; i++) {
+    char free = map[i];
+    if (free == 0) {
+      /* Found free bit return index */
+      return i;
+    }
+  }
+  /* Could not find free bit */
+  return -1;
+}
+
+void mark_inode_unused(struct inode *inode)
+{
+  /* Look for free bit */
+	printk(KERN_INFO "Setting inode->i_ino: %d as unused\n", inode->i_ino);
+	char *map;
+	struct buffer_head *bh = NULL;
+	int ino_num = inode->i_ino;
+
+	/* Find first place open in bitmap for inode */
+
+	bh = sb_bread(inode->i_sb, 1);
+	map = (char*) bh->b_data;
+    map[ino_num] = 0;
+	mark_buffer_dirty(bh);
+	brelse(bh);
+}
+
+
+int lab5fs_readdir(struct file *filp, void *dirent, filldir_t filldir)
+{
+	printk(KERN_INFO "********Inside lab5fs_readdir********\n");
+	int retval = 0, i, inode_index = 0;
+	char *map = NULL;
+	struct inode *in;
+	struct dentry *de = filp->f_dentry;
+	struct inode *dir = root_inode;
+	struct buffer_head *bh = NULL;
+	struct lab5fs_inode *l5inode = NULL;
+	struct super_block *sb = g_sb;
+
+
+	spin_lock(&dir->i_lock);
+	printk(KERN_INFO "READING FROM POS: %d, dir_size: %lu\n", filp->f_pos, dir->i_size);
+	spin_unlock(&dir->i_lock);
+	/* Check bounds of directory */
+	//	if (filp->f_pos > (sb->s_inode_blocks_total - sb->s_inode_blocks_free)) {
+	//		printk(KERN_INFO "At end of directory\n");
+	//		return 0;
+	//	}
+
+	if (filp->f_pos > dir->i_size-1) {
+		printk(KERN_INFO "lab5fs: file pos larger then dir size.\n");
+		goto done;
+	}
+
+	/* Read . or .. from directory entry */
+	if (filp->f_pos == 0) {
+		/* . dir */
+		printk(KERN_INFO "Getting .\n");
+		retval = filldir(dirent, ".", 1, filp->f_pos, 19, DT_DIR);//dir->i_ino, DT_DIR);
+		printk(KERN_INFO "Inode num %d...\n", dir->i_ino);
+		//if (retval < 0) goto done;
+		filp->f_pos++;
+		goto done;
+	}
+	if (filp->f_pos == 1) {
+		/* .. dir */
+		printk(KERN_INFO "Getting ..\n");
+		retval = filldir(dirent, "..", 2, filp->f_pos,
+				20, DT_DIR);//de->d_parent->d_inode->i_ino, DT_DIR);
+		printk(KERN_INFO "Inode num %d...\n", de->d_parent->d_inode->i_ino);
+		//if (retval < 0) goto done;
+		filp->f_pos++;
+		goto done;
+	}
+
+	/* Loop through other files */
+	//	bh = __bread(g_bdev, 1, l5sb->blocksize);
+	bh = sb_bread(dir->i_sb, 1);
+	map = (char *) bh->b_data;
+
+	for (i = 1; i < LAB5FS_BLOCKSIZE; i++) {
+		int block = 3 + i;
+		int is_valid = (map[i] == 1);
+
+		if (is_valid) {
+			int block_num = ino_num_to_blk_num(i);
+			struct buffer_head *bh2 = sb_bread(dir->i_sb, block_num);
+			struct lab5fs_inode *ino = (struct lab5fs_inode *) bh2->b_data;
+
+			struct inode * inode = iget(dir->i_sb, i);
+			//			printk(KERN_INFO "Inode num: %d, name: %s\n, i: %d", inode->i_ino, ino->name, i);
+			//			retval = filldir(dirent, ino->name, LAB5FS_NAMELEN, filp->f_pos,
+			//		  				inode->i_ino, DT_REG);
+			//			filp->f_pos++;
+
+			//reading aliases form in-memory inode ds
+			//			if(S_ISREG(inode->i_mode) && inode->i_nlink > 1){
+			printk(KERN_INFO "for ino: %d, adding aliases to READDIR output, i->nlinks: %d\n", inode->i_ino, inode->i_nlink);
+			//				struct inode * inode = iget(dir->i_sb, ino->i_ino);
+			struct list_head *head, *next, *tmp;
+			struct dentry *alias, *discon_alias=NULL;
+
+			head = &inode->i_dentry;
+			next = inode->i_dentry.next;
+			int i = 0;
+			char * last_dname = NULL;
+			while (next != head) {
+				if(i >= inode->i_nlink){
+					filp->f_pos = dir->i_size;
+				}
+				if (filp->f_pos > dir->i_size) {
+					printk(KERN_INFO "lab5fs: file pos larger then dir size.\n");
+					goto done;
+				}
+				tmp = next;
+				next = tmp->next;
+				prefetch(next);
+				alias = list_entry(tmp, struct dentry, d_alias);
+				printk(KERN_INFO "Found alias: %s\n", alias->d_iname);
+				if(last_dname == NULL || strcmp(alias->d_iname, last_dname) != 0){
+					last_dname = alias->d_iname;
+					printk(KERN_INFO "Writing alias: %s\n", alias->d_iname);
+					retval = filldir(dirent, alias->d_iname, LAB5FS_NAMELEN, filp->f_pos,
+							inode->i_ino, DT_REG);
+					filp->f_pos++;
+				}
+
+
+			}
+			//			}
+			//reading inode from on disk inode ds
+			//			if(S_ISREG(ino->i_mode) && ino->i_nlink > 1 ){
+			//					printk(KERN_INFO "i_nlinks > 1 for ino: %d, adding aliases to READDIR output\n", ino->i_ino);
+			//					int i = 0;
+			//					for(; i < ino->i_nlink-1; i++){
+			//						char tmp[LAB5FS_NAMELEN];
+			//						memset(tmp, '\0', LAB5FS_NAMELEN + 1);
+			//						strncpy(tmp, ino->alias[i * LAB5FS_NAMELEN], LAB5FS_NAMELEN);
+			//						printk(KERN_INFO "Alias No: %d, Name: %s", i, tmp);
+			//						retval = filldir(dirent, tmp, LAB5FS_NAMELEN, filp->f_pos,
+			//									ino->i_ino, DT_REG);
+			//						filp->f_pos++;
+			////						struct qstr name = { .name = tmp, .len = LAB5FS_NAMELEN };
+			////						struct dentry *new_dentry = d_alloc(NULL, &name);
+			////						dget(new_dentry);
+			////						d_instantiate(new_dentry, inode);
+			//					}
+			//			}
+			brelse(bh2);
+		}
+
+		//		if (filp->f_pos > (sb->s_inode_blocks_total - sb->s_inode_blocks_free)) {
+		//			printk(KERN_INFO "At end of directory: 2\n");
+		//			goto done;
+		//		}
+		if (filp->f_pos > dir->i_size) {
+			printk(KERN_INFO "lab5fs: file pos larger then dir size.\n");
+			goto done;
+		}
+	}
+	brelse(bh);
+
+	done:
+	/* Update access time */
+	filp->f_version = dir->i_version;
+	update_atime(dir);
+	printk(KERN_INFO "Going to return %d...\n", retval);
+	return 0;
+} /* readdir */
 
 
 /* Superblock operations */
@@ -350,6 +755,7 @@ void lab5fs_read_inode(struct inode *inode)
 	/* Read at given block address */
 //	if (!g_bdev) { printk(KERN_INFO "BLOCK DEV IS NULL!\n"); }
 
+	printk(KERN_INFO "SB CHECK in read_inode = %lu\n", inode->i_sb->s_magic);
 	bh = sb_bread(inode->i_sb, block_addr);
 //	bh = __bread(g_bdev, block_addr, l5sb->blocksize);
 
@@ -362,24 +768,31 @@ void lab5fs_read_inode(struct inode *inode)
 	inode->i_mode = inode_temp->i_mode;
 	inode->i_uid = inode_temp->i_uid;
 	inode->i_gid = inode_temp->i_gid;
-	struct timespec atime =  {
-		.tv_sec = inode_temp->i_atime
-	};
-	struct timespec mtime =  {
-		.tv_sec = inode_temp->i_mtime
-	};
-	struct timespec ctime =  {
-		.tv_sec = inode_temp->i_ctime
-	};
 
-	inode->i_atime = atime;
-	inode->i_mtime = mtime;
-	inode->i_ctime = ctime;
+	inode->i_atime = inode_temp->i_atime;
+	inode->i_mtime = inode_temp->i_mtime;
+	inode->i_ctime = inode_temp->i_ctime;
 	printk(KERN_INFO "Inode temp has %d blocks\n", inode_temp->i_num_blocks);
 	inode->i_blocks = inode_temp->i_num_blocks;
 	inode->i_size = inode_temp->i_size;
 	inode->i_blksize = inode->i_sb->s_blocksize;
-	inode->i_nlink = 1;  // temp
+	inode->i_nlink = inode_temp->i_nlink;  // temp
+	if(S_ISREG(inode->i_mode) && inode->i_nlink > 1 ){
+		printk(KERN_INFO "Greater than one nlinks, initializing aliases");
+		int i = 0;
+		for(; i < inode->i_nlink; i++){
+			char tmp[LAB5FS_NAMELEN];
+			memset(tmp, '\0', LAB5FS_NAMELEN + 1);
+			strncpy(tmp, inode_temp->alias[i * LAB5FS_NAMELEN], LAB5FS_NAMELEN);
+			printk(KERN_INFO "Alias No: %d, Name: %s", i, tmp);
+			struct qstr name = { .name = tmp, .len = LAB5FS_NAMELEN };
+			struct dentry *new_dentry = d_alloc(NULL, &name);
+			dget(new_dentry);
+			d_instantiate(new_dentry, inode);
+		}
+	}else{
+
+	}
 	inode->i_fop = &lab5fs_file_operations;
 	inode->i_op = &lab5fs_dir_inode_operations;
 	inode->i_mapping->a_ops = &lab5fs_aops;
@@ -403,10 +816,71 @@ void lab5fs_read_inode(struct inode *inode)
 	brelse(bh);
 }
 
+int lab5fs_write_inode(struct inode *inode, int unused)
+{
+	printk(KERN_INFO "********Inside lab5fs_write_inode********\n");
+	// Read inode from disk and update
+
+	int ino_num = inode->i_ino;
+
+	if(!inode->i_sb){
+		printk(KERN_INFO "inode->i_sb is NULL in write_inode\n");
+	}
+	printk(KERN_INFO "SB CHECK in write_inode= %lu\n", inode->i_sb->s_magic);
+	printk(KERN_INFO "PRE: Writing inode: %d, size:%lu \n", ino_num, inode->i_size);
+	//  struct buffer_head *bh = __bread(g_bdev, ino_num+3, l5sb->blocksize);
+//	printk(KERN_INFO "inode->i_sb->s_root->d_inode->i_ino: \n", inode->i_sb->s_root->d_inode->i_ino);
+	printk(KERN_INFO "inode->i_sb->s_blocksize: \n", inode->i_sb->s_blocksize);
+	struct buffer_head *bh = sb_bread(inode->i_sb, ino_num+3);
+	struct lab5fs_inode *ondiskino = (struct lab5fs_inode *) bh->b_data;
+
+
+	printk(KERN_INFO "buffer head initialized!\n");
+	ondiskino->i_uid = inode->i_uid;
+	ondiskino->i_gid = inode->i_gid;
+	ondiskino->i_mode = inode->i_mode;
+	printk(KERN_INFO "inodeondiskblks %d\n", ondiskino->i_num_blocks);
+	printk(KERN_INFO "inodeblks %d\n", inode->i_blocks);
+	ondiskino->i_num_blocks = inode->i_blocks;
+	ondiskino->i_size = inode->i_size;
+	ondiskino->i_atime = inode->i_atime;
+	ondiskino->i_ctime = inode->i_ctime;
+	ondiskino->i_mtime = inode->i_mtime;
+	if(S_ISREG(inode->i_mode) && inode->i_nlink > 1){
+		printk(KERN_INFO "i_nlinks > 0, writing aliases to disk inode\n");
+		struct list_head *head, *next, *tmp;
+		struct dentry *alias, *discon_alias=NULL;
+
+		head = &inode->i_dentry;
+		next = inode->i_dentry.next;
+		char * last_dname = NULL;
+		int i = 0;
+		while (next != head) {
+			tmp = next;
+			next = tmp->next;
+			prefetch(next);
+			alias = list_entry(tmp, struct dentry, d_alias);
+			printk(KERN_INFO "Found alias: %s\n", alias->d_iname);
+			if(last_dname == NULL || strcmp(alias->d_iname, last_dname) != 0){
+				last_dname = alias->d_iname;
+				printk(KERN_INFO "Writing alias: %s\n", alias->d_iname);
+				strncpy(ondiskino->alias[i], alias->d_iname, LAB5FS_NAMELEN);
+			}
+		}
+	}
+
+	//ondiskino->name = inode->name;  //FIXME:would be strcpy
+	//  strcpy(inode->, ondiskino->name);
+	mark_buffer_dirty_inode(bh, inode);
+	printk(KERN_INFO "Done marking as dirty\n");
+
+	brelse(bh);
+	return 0;
+}
 
 struct inode *lab5fs_get_inode(struct super_block *sb, int mode, dev_t dev)
 {
-	printk(KERN_INFO "Inside get_inode");
+	printk(KERN_INFO "Inside get_inode\n");
 	struct inode * inode = new_inode(sb);
 
 	if (inode) {
@@ -416,6 +890,8 @@ struct inode *lab5fs_get_inode(struct super_block *sb, int mode, dev_t dev)
 		inode->i_blksize = LAB5FS_BLOCKSIZE;
 		inode->i_blocks = 0;
 		inode->i_mapping->a_ops = &lab5fs_aops;
+		printk(KERN_INFO "SB CHECK in get_inode= %lu\n", sb->s_magic);
+		inode->i_sb = sb;
 //		inode->i_mapping->backing_dev_info = &lab5fs_backing_dev_info;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
@@ -430,6 +906,10 @@ struct inode *lab5fs_get_inode(struct super_block *sb, int mode, dev_t dev)
 			inode->i_op = &lab5fs_dir_inode_operations;
 //			inode->i_fop = &simple_dir_operations;
 			inode->i_fop = &lab5fs_file_operations;
+			spin_lock(&inode->i_lock);
+			inode->i_size=2;
+			spin_unlock(&inode->i_lock);
+
 
 			/* directory inodes start off with i_nlink == 2 (for "." entry) */
 			inode->i_nlink++;
@@ -464,7 +944,6 @@ static int lab5fs_fill_super(struct super_block *sb, void *data, int silent){
 	sb->s_op = &lab5fs_ops;
 
 	inode = iget(sb, 0);
-	root_inode = inode;
 //	inode = lab5fs_get_inode(sb, S_IFDIR | 0755, 0);
 //	inode->i_ino = 0;
 
@@ -475,8 +954,9 @@ static int lab5fs_fill_super(struct super_block *sb, void *data, int silent){
 	if (inode) {
 	printk(KERN_INFO "Read lab5fs root inode: %lu\n", inode->i_ino);
 	printk(KERN_INFO "i_size: %lu\n", inode->i_size);
-	printk(KERN_INFO "Write time: %lu\n", inode->i_atime.tv_nsec);
+	printk(KERN_INFO "Write time: %lu\n", inode->i_atime.tv_sec);
 	}
+	root_inode = inode;
 
 	root = d_alloc_root(inode);
 	if (!root) {
@@ -485,13 +965,17 @@ static int lab5fs_fill_super(struct super_block *sb, void *data, int silent){
 	}
 	sb->s_root = root;
 	brelse(bh);
+	printk(KERN_INFO "returning from read_inode\n");
 	return 0;
 }
 
 static struct super_block *lab5fs_get_sb(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
-	return get_sb_bdev(fs_type, flags, dev_name, data, lab5fs_fill_super);
+	struct super_block *sb = NULL;
+	sb = get_sb_bdev(fs_type, flags, dev_name, data, lab5fs_fill_super);
+	g_sb = sb;
+	return sb;
 }
 
 static struct file_system_type lab5fs_fs_type = {

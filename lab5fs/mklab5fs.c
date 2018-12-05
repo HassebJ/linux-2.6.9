@@ -13,43 +13,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "lab5fs.h"
-//
-//lab5fs_ino create_inode(const char *fname, int dir, int sblock, int eblock)
-//{
-//    struct passwd *user_pw;
-//    struct timespec ctime;
-//    lab5fs_ino i;
-//    user_pw = getpwnam((const char *) getlogin());
-//
-//    if (!user_pw) {
-//        printf("ERROR: Could not get user information\n");
-//        exit(1);
-//    }
-//
-//    ctime.tv_sec = time(NULL);
-//    ctime.tv_nsec = 0;
-//
-//    i.i_uid  = user_pw->pw_uid;
-//    i.i_gid  = user_pw->pw_gid;
-//    if (dir == 1) {
-//        i.i_mode = S_IFDIR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
-//    } else {
-//        i.i_mode = S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
-//    }
-//    i.i_atime = ctime;
-//    i.i_mtime = ctime;
-//    i.i_ctime = ctime;
-//    i.i_sblock = sblock;
-//    i.i_eblock = eblock;
-//    i.blocks = (sblock == 0) ? 0 : 1;
-//    i.is_hard_link     = 0;
-//    i.block_to_link_to = 0;
-//    strcpy(i.name, fname);
-//
-//    return i;
-//}
 
 int main(int argc, char *argv[]) {
     char *c = "This is a test\0";
@@ -74,19 +40,18 @@ int main(int argc, char *argv[]) {
 //    sb.data_loc = BLOCK_N(129, sb.blocksize);
 //    sb.root_inode_loc = sb.inode_loc;
 //    sb.blocks_total = 2441;
-//    sb.inode_blocks_total = 1250;
+    sb.s_inode_blocks_total = 1250;
 //    sb.data_blocks_total  = sb.blocks_total - sb.inode_blocks_total;
 //    sb.data_blocks_free   = sb.data_blocks_total;
-//    sb.inode_blocks_free  = sb.inode_blocks_total - 1;
+    sb.s_inode_blocks_free  = sb.s_inode_blocks_total - 1;
 //    sb.last_data_block = 0;
 
-        time_t ctime = time(NULL);
-//        ctime.tv_nsec = 0;
-
+        struct timespec ctime;
+        clock_gettime(CLOCK_REALTIME, &ctime);
         root_inode.i_uid  = 0;
         root_inode.i_gid  = 0;
 
-        root_inode.i_mode = S_IFDIR;
+        root_inode.i_mode = S_IFDIR | S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
 
         root_inode.i_atime = ctime;
         root_inode.i_mtime = ctime;
@@ -96,6 +61,8 @@ int main(int argc, char *argv[]) {
         root_inode.i_nlink = 1;
         root_inode.i_num_blocks = 0;
         root_inode.i_size = 2;
+//        memset(root_inode.name, '\0', LAB5FS_NAMELEN);
+        strcpy(root_inode.name, "/");
 //        i.is_hard_link     = 0;
 //        i.block_to_link_to = 0;
 //        strcpy(i.name, fname);
@@ -131,5 +98,7 @@ int main(int argc, char *argv[]) {
     //fseek(file, 10240, SEEK_SET);
     //fprintf(file, "%c", 0);
     fclose(file);
-    return 0;
+    
+	printf("Properly mounted in image\n");
+	return 0;
 }

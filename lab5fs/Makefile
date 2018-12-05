@@ -26,8 +26,12 @@ mount:
 	dmesg
 	
 mklab5fs:
-	gcc -g -o mklab5fs mklab5fs.c
+	gcc -g -lrt -o mklab5fs mklab5fs.c
 	
 unmount:
 	umount p
 	rmmod lab5fs
+
+img:
+	dd if=/dev/zero of=image bs=1024 count=1024
+image: img
